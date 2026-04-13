@@ -3,30 +3,30 @@ CellForge — built-in Python library for notebooks.
 
 One import gives you everything:
 
-    import cellforge as bl
+    import cellforge as cf
 
     # Interactive widgets
-    s = bl.slider("Speed", min=1, max=100, value=50)
-    b = bl.button("Run")
-    t = bl.text("Name", value="Alice")
-    d = bl.dropdown("Color", options=["red", "green", "blue"])
+    s = cf.slider("Speed", min=1, max=100, value=50)
+    b = cf.button("Run")
+    t = cf.text("Name", value="Alice")
+    d = cf.dropdown("Color", options=["red", "green", "blue"])
 
     # Charts
-    bl.bar([10, 30, 50], labels=["A", "B", "C"], title="Sales")
-    bl.line([1, 4, 2, 8], title="Trend", color="#ff79c6")
-    bl.pie([40, 30, 20], labels=["X", "Y", "Z"])
-    bl.hbar([90, 60, 80], labels=["CPU", "RAM", "Disk"])
+    cf.bar([10, 30, 50], labels=["A", "B", "C"], title="Sales")
+    cf.line([1, 4, 2, 8], title="Trend", color="#ff79c6")
+    cf.pie([40, 30, 20], labels=["X", "Y", "Z"])
+    cf.hbar([90, 60, 80], labels=["CPU", "RAM", "Disk"])
 
     # Diagrams
-    bl.mermaid("graph TD; A-->B")
+    cf.mermaid("graph TD; A-->B")
 
     # UI elements
-    bl.stat("Accuracy", "94.2%", delta="+1.3%")
-    bl.callout("Done!", kind="success")
-    bl.progress(73, 100, label="Training")
+    cf.stat("Accuracy", "94.2%", delta="+1.3%")
+    cf.callout("Done!", kind="success")
+    cf.progress(73, 100, label="Training")
 
     # Live-updating progress
-    for i in bl.track(range(100), label="Epoch"):
+    for i in cf.track(range(100), label="Epoch"):
         train_step()
 """
 
