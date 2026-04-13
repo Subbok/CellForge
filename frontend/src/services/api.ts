@@ -227,9 +227,9 @@ export const api = {
     username: string;
     display_name: string;
     is_admin: boolean;
-    stats: { notebook_count: number; running_kernels: number; shared_count: number };
+    stats: { recent_notebooks_count: number; running_kernels_count: number; shared_files_count: number };
     recent_notebooks: { file_path: string; last_opened: string }[];
-    shared_files: { from_user: string; file_name: string }[];
+    shared_files: { id: number; from_user: string; file_name: string }[];
     running_kernels: { id: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number; started_at: string }[];
   }>('/dashboard'),
   getDashboardKernels: () => get<{

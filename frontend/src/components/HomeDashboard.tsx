@@ -63,7 +63,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
   const [error, setError] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const loadDashboard = useCallback(async () => {
     try {
