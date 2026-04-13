@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: cellforge-linux-x64
+            binary: cellforge-server
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: cellforge-macos-x64
+            binary: cellforge-server
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: cellforge-macos-arm64
+            binary: cellforge-server
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: cellforge-windows-x64
+            binary: cellforge-server.exe
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # Build frontend first — rust-embed bakes it into the binary
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      # Build portable binary with embedded frontend
+      - name: Build portable binary
+        run: cargo build --release --target ${{ matrix.target }} -p cellforge-server --features embed-frontend
+
+      # Ad-hoc sign on macOS so Gatekeeper doesn't flag it as damaged
+      - name: Sign binary (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --force --sign - target/${{ matrix.target }}/release/${{ matrix.binary }}
+
+      # Rename to platform-specific artifact name
+      - name: Prepare artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+
+      - name: Prepare artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "${{ matrix.artifact }}.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.artifact }}.exe
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/cellforge-*

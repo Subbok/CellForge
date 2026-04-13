@@ -1,0 +1,17 @@
+{
+  "name": "bliss-mermaid",
+  "version": "0.1.0",
+  "display_name": "Mermaid Diagrams",
+  "description": "Render Mermaid diagrams in notebook cell outputs",
+  "author": "suddoku",
+  "contributes": {
+    "widgets": [
+      {
+        "tag_name": "bliss-mermaid",
+        "module": "plugin.js",
+        "stateful": false
+      }
+    ],
+    "pylib": ["bliss_mermaid.py"]
+  }
+}

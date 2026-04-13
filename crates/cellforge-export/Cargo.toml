@@ -1,0 +1,21 @@
+[package]
+name = "cellforge-export"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cellforge-notebook = { path = "../cellforge-notebook" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+base64 = "0.22"
+
+# typst compiler — embedded, no CLI needed
+typst = "0.14"
+typst-pdf = "0.14"
+typst-syntax = "0.14"
+typst-eval = "0.14"
+comemo = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+dirs = "6"

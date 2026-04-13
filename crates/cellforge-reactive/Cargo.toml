@@ -1,0 +1,13 @@
+[package]
+name = "cellforge-reactive"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+tree-sitter = "0.25"
+tree-sitter-python = "0.25"
+indexmap = { version = "2", features = ["serde"] }

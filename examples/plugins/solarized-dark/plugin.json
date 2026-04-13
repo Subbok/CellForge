@@ -1,0 +1,30 @@
+{
+  "name": "solarized-dark",
+  "version": "0.1.0",
+  "display_name": "Solarized Dark",
+  "description": "Ethan Schoonover's Solarized palette, dark variant",
+  "author": "suddoku",
+  "contributes": {
+    "themes": [
+      {
+        "id": "solarized-dark",
+        "name": "Solarized Dark",
+        "vars": {
+          "--color-bg": "#002b36",
+          "--color-bg-secondary": "#073642",
+          "--color-bg-elevated": "#073642",
+          "--color-bg-hover": "#2a4a52",
+          "--color-bg-output": "#002b36",
+          "--color-border": "#586e75",
+          "--color-text": "#fdf6e3",
+          "--color-text-secondary": "#93a1a1",
+          "--color-text-muted": "#657b83",
+          "--color-accent": "#b58900",
+          "--color-accent-hover": "#9a7500",
+          "--color-cell-active": "#b58900",
+          "--color-accent-fg": "#002b36"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+target/
+frontend/node_modules/
+frontend/dist/
+.git/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.swp
+heat_1d_data.npz
+cellforge_ui.py

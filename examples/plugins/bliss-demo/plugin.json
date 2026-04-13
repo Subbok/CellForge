@@ -1,0 +1,94 @@
+{
+  "name": "bliss-demo",
+  "version": "0.1.0",
+  "display_name": "Demo Plugin (all features)",
+  "description": "Exercises every plugin contribution type. For testing only.",
+  "author": "suddoku",
+  "contributes": {
+    "themes": [
+      {
+        "id": "dracula",
+        "name": "Dracula",
+        "vars": {
+          "--color-bg": "#282a36",
+          "--color-bg-secondary": "#282a36",
+          "--color-bg-elevated": "#44475a",
+          "--color-bg-output": "#282a36",
+          "--color-bg-hover": "#44475a",
+          "--color-border": "#6272a4",
+          "--color-text": "#f8f8f2",
+          "--color-text-secondary": "#bd93f9",
+          "--color-text-muted": "#6272a4",
+          "--color-accent": "#ff79c6",
+          "--color-accent-hover": "#ff92d0",
+          "--color-accent-fg": "#282a36",
+          "--color-cell-active": "#ff79c6"
+        }
+      }
+    ],
+
+    "pylib": ["bliss_demo.py"],
+
+    "widgets": [
+      {
+        "tag_name": "bliss-demo-chart",
+        "module": "plugin.js",
+        "stateful": false
+      }
+    ],
+
+    "toolbar_buttons": [
+      {
+        "id": "demo-hello",
+        "label": "Demo",
+        "icon": "sparkles",
+        "command": "bliss-demo.hello",
+        "position": "right"
+      }
+    ],
+
+    "sidebar_panels": [
+      {
+        "id": "demo-panel",
+        "title": "Demo",
+        "icon": "puzzle",
+        "module": "plugin.js"
+      }
+    ],
+
+    "cell_actions": [
+      {
+        "id": "demo-cell-info",
+        "label": "Info",
+        "icon": "info",
+        "command": "bliss-demo.cell-info"
+      }
+    ],
+
+    "keybindings": [
+      {
+        "key": "ctrl+shift+d",
+        "command": "bliss-demo.hello",
+        "command_mode_only": true
+      }
+    ],
+
+    "export_formats": [
+      {
+        "id": "demo-txt",
+        "label": "Plain Text (demo)",
+        "extension": "txt",
+        "command": "bliss-demo.export-txt"
+      }
+    ],
+
+    "status_bar_items": [
+      {
+        "id": "demo-status",
+        "label": "Demo plugin active",
+        "position": "right",
+        "command": "bliss-demo.hello"
+      }
+    ]
+  }
+}

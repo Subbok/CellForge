@@ -1,0 +1,22 @@
+[package]
+name = "cellforge-kernel"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+
+zeromq = "0.5"
+bytes = "1"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+futures = "0.3"
+dirs = "6"
+libc = "0.2"
