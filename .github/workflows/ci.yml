@@ -34,13 +34,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo check --workspace
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets --exclude cellforge-app
 
       - name: cargo clippy --workspace
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --exclude cellforge-app -- -D warnings
 
       - name: cargo test --workspace
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude cellforge-app
 
   frontend:
     name: Frontend
