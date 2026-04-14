@@ -29,14 +29,14 @@ Or grab a binary from [Releases](../../releases):
 
 | Platform | Server | Desktop |
 |---|---|---|
-| Linux x64 | `cellforge-linux-x64` | `cellforge-linux-x64-desktop.AppImage` |
+| Linux x64 | `cellforge-linux-x64` | — |
 | Linux ARM64 | `cellforge-linux-arm64` | — |
-| macOS x64 | `cellforge-macos-x64` | `cellforge-macos-x64-desktop.dmg` |
-| macOS ARM | `cellforge-macos-arm64` | `cellforge-macos-arm64-desktop.dmg` |
+| macOS x64 | `cellforge-macos-x64` | — |
+| macOS ARM | `cellforge-macos-arm64` | — |
 | Windows x64 | `cellforge-windows-x64.exe` | `cellforge-windows-x64-desktop.exe` |
 | Windows ARM64 | `cellforge-windows-arm64.exe` | `cellforge-windows-arm64-desktop.exe` |
 
-**Server** opens in your browser at http://localhost:8888. **Desktop** is a native window — same features, no browser needed. Both ship as single portable files with the frontend and Typst compiler embedded (~30 MB).
+**Server** opens in your browser at http://localhost:8888. Single portable file with the frontend and Typst compiler embedded (~30 MB). **Desktop** (Windows only for now) is a native window — same features, no browser needed.
 
 You need at least one Jupyter kernel installed: `pip install ipykernel`
 
