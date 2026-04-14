@@ -771,4 +771,3 @@ pub struct RecentNotebook {
     pub file_path: String,
     pub last_opened: String,
 }
-

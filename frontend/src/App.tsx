@@ -198,7 +198,7 @@ function App() {
     }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, []);
+  }, [t]);
 
   // check auth on mount, then load notebook if URL points to one
   useEffect(() => {

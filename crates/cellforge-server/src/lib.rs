@@ -214,10 +214,7 @@ fn build_api_router() -> Router<Arc<AppState>> {
 }
 
 /// Start the CellForge server on the given listener with the provided config.
-pub async fn run_server(
-    listener: tokio::net::TcpListener,
-    config: Config,
-) -> anyhow::Result<()> {
+pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> anyhow::Result<()> {
     let state = Arc::new(AppState::new(&config));
 
     // non-blocking update check
