@@ -17,14 +17,16 @@ use tokio::sync::Mutex;
 use tower::ServiceExt;
 
 /// Build a minimal AppState pointing at the given temp directory.
+/// Each test gets its own SQLite database to avoid "database is locked" errors.
 fn test_state(dir: &std::path::Path) -> Arc<AppState> {
+    let db_path = dir.join("test_users.db");
     Arc::new(AppState {
         notebook_dir: dir.to_path_buf(),
         initial_notebook: None,
         sessions: RwLock::new(HashMap::new()),
         kernels: Mutex::new(KernelManager::new()),
         notebook_kernels: Mutex::new(HashMap::new()),
-        users: UserDb::open().expect("user db"),
+        users: UserDb::open_at(db_path).expect("user db"),
         collab: Arc::new(CollabState::new()),
         plugin_settings: RwLock::new(PluginSettings::default()),
         hub_mode: false,

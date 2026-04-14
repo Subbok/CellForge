@@ -2,7 +2,7 @@
 
 > A modern notebook IDE — Rust backend, React frontend, real Jupyter kernels, live collaboration, and PDF export via Typst.
 
-![version](https://img.shields.io/badge/version-0.3.5-blue)
+![version](https://img.shields.io/badge/version-0.4.0-blue)
 ![rust](https://img.shields.io/badge/rust-2024-orange)
 ![react](https://img.shields.io/badge/react-19-61dafb)
 ![status](https://img.shields.io/badge/status-work%20in%20progress-yellow)
@@ -10,6 +10,8 @@
 
 > ⚠️ **Heads up — CellForge is an early-stage, single-developer project.**
 > It works well for my day-to-day notebook work, but expect rough edges: bugs, missing features, things that only ever got tested on one Linux box. If you hit something broken, open an issue — that's the fastest way to get it fixed.
+
+**[Getting Started →](https://github.com/Subbok/CellForge/wiki/Getting-Started)** — download, install a kernel, and create your first notebook in under 5 minutes.
 
 ---
 
@@ -44,6 +46,12 @@ docker build -t cellforge .
 docker run -p 8888:8888 -v ~/notebooks:/data cellforge
 ```
 
+Or use the interactive setup script to choose which kernels to include:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Subbok/CellForge/main/scripts/docker-install.sh | bash
+```
+
 Open http://localhost:8888 — notebooks are stored in `~/notebooks`.
 
 ## ⬇️ Downloads
@@ -58,6 +66,11 @@ Portable binaries for every release are on the [Releases](../../releases) page �
 | macOS ARM | `cellforge-macos-arm64` | `cellforge-macos-arm64-desktop` |
 | Windows x64 | `cellforge-windows-x64.exe` | `cellforge-windows-x64-desktop.exe` |
 | Windows ARM64 | `cellforge-windows-arm64.exe` | `cellforge-windows-arm64-desktop.exe` |
+
+**Quick install (Linux x64):**
+```bash
+curl -fsSL https://github.com/Subbok/CellForge/releases/latest/download/cellforge-linux-x64 -o cellforge && chmod +x cellforge && ./cellforge
+```
 
 **Server** — opens in your browser at http://localhost:8888. One portable binary with the frontend embedded.
 

@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { useKernelStore } from '../stores/kernelStore';
 import { Cpu, Download, Package, RefreshCw, Zap, Terminal } from 'lucide-react';
 import { copyToClipboard } from '../lib/clipboard';
+import { langColor } from '../lib/languages';
 import { useModal } from './ModalDialog';
 
 interface SpecEntry {
@@ -19,16 +20,6 @@ interface Props {
   onSelect: (kernelName: string) => void;
   onSkip?: () => void;
   onCancel?: () => void;
-}
-
-const LANG_COLORS: Record<string, string> = {
-  python: '#7aa2f7',
-  r: '#2d7dca',
-  julia: '#9558b2',
-};
-
-function langColor(lang: string): string {
-  return LANG_COLORS[lang.toLowerCase()] ?? '#7aa2f7';
 }
 
 export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {

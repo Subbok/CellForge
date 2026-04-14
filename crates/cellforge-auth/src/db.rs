@@ -21,8 +21,12 @@ impl UserDb {
     pub fn open() -> Result<Self> {
         let dir = cellforge_config::config_dir();
         std::fs::create_dir_all(&dir)?;
-        let db_path = dir.join("users.db");
+        Self::open_at(dir.join("users.db"))
+    }
 
+    /// Open a database at a specific path. Useful for tests that need
+    /// an isolated database to avoid "database is locked" errors.
+    pub fn open_at(db_path: std::path::PathBuf) -> Result<Self> {
         let conn = Connection::open(&db_path)
             .with_context(|| format!("opening db at {}", db_path.display()))?;
 

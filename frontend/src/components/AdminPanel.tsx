@@ -10,7 +10,7 @@ interface AdminUser { username: string; display_name: string; is_admin: boolean;
 interface AdminGroup { name: string; description: string; max_kernels_per_user: number; max_memory_mb_per_user: number; }
 interface AdminKernel { id: string; username: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number; }
 
-const LANG_COLORS: Record<string, string> = { python: '#7aa2f7', r: '#2d7dca', julia: '#9558b2' };
+import { langColor } from '../lib/languages';
 
 export function AdminPanel({ onBack }: Props) {
   const { t } = useTranslation();
@@ -290,19 +290,19 @@ export function AdminPanel({ onBack }: Props) {
           {kernels.length > 0 ? (
             <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
               {kernels.map(k => {
-                const langColor = LANG_COLORS[k.language?.toLowerCase()] ?? '#7aa2f7';
+                const color = langColor(k.language ?? '');
                 return (
                   <div key={k.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-bg-hover/30 transition-colors group">
                     <div className="relative">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${langColor}12` }}>
-                        <Cpu size={15} style={{ color: langColor }} />
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${color}12` }}>
+                        <Cpu size={15} style={{ color }} />
                       </div>
                       <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-bg ${k.status === 'busy' ? 'bg-warning animate-pulse' : 'bg-success'}`} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-text font-medium">{k.notebook_path?.split('/').pop() ?? k.kernel_spec}</span>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ backgroundColor: `${langColor}15`, color: langColor }}>{k.language}</span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ backgroundColor: `${color}15`, color }}>{k.language}</span>
                       </div>
                       <p className="text-[11px] text-text-muted">@{k.username} &middot; {k.status} &middot; {k.memory_mb} MB</p>
                     </div>

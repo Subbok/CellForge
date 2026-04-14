@@ -6,6 +6,7 @@ import { useExecuteCell } from '../../hooks/useKernel';
 import { registerKernelCompletion } from '../../services/monacoCompletion';
 import { registerR } from '../../lib/monaco-r';
 import { registerJulia } from '../../lib/monaco-julia';
+import { monacoLanguage } from '../../lib/languages';
 import { formatPythonCode } from '../../services/formatCode';
 import * as bp from '../../services/breakpoints';
 import { bindEditor, isActive as isCollabActive } from '../../services/collaboration';
@@ -182,7 +183,7 @@ export function CodeCell({ cell, index }: { cell: Cell; index: number }) {
     <div ref={containerRef} className="relative">
       <Editor
         key={`${cell.id}-${index}`}
-        language={monacoLang === 'r' ? 'r' : monacoLang === 'julia' ? 'julia' : 'python'}
+        language={monacoLanguage(monacoLang)}
         // When collab is active, MonacoBinding owns the model — don't set value
         // as a controlled prop or it will fight with Yjs and reset cursors.
         {...(isCollabActive() ? { defaultValue: cell.source } : { value: cell.source })}

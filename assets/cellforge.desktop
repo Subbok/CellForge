@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CellForge
+Comment=Modern notebook IDE with Jupyter kernels, live collaboration, and PDF export
+Exec=cellforge-app
+Icon=cellforge
+Terminal=false
+Categories=Development;Science;Education;
+MimeType=application/x-ipynb+json;

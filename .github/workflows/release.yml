@@ -15,32 +15,39 @@ jobs:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: cellforge-linux-x64
             binary: cellforge-server
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            artifact: cellforge-macos-x64
-            binary: cellforge-server
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            artifact: cellforge-macos-arm64
-            binary: cellforge-server
+            desktop: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: cellforge-linux-arm64
             binary: cellforge-server
+            desktop: false
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: cellforge-macos-x64
+            binary: cellforge-server
+            desktop: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: cellforge-macos-arm64
+            binary: cellforge-server
+            desktop: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact: cellforge-windows-x64
             binary: cellforge-server.exe
+            desktop: true
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             artifact: cellforge-windows-arm64
             binary: cellforge-server.exe
+            desktop: true
 
     steps:
       - uses: actions/checkout@v5
@@ -62,7 +69,6 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      # Build frontend first — rust-embed bakes it into the binary
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci
@@ -70,6 +76,8 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      # --- Cross-compilation setup ---
 
       - name: Install cross-compilation tools (Linux ARM)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -79,35 +87,145 @@ jobs:
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
-      - name: Install desktop dependencies (Linux)
-        if: runner.os == 'Linux' && matrix.target != 'aarch64-unknown-linux-gnu'
+      - name: Install desktop dependencies (Linux x64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
 
-      # Build portable binary with embedded frontend
+      # --- Build server binary ---
+
       - name: Build portable binary
         run: cargo build --release --target ${{ matrix.target }} -p cellforge-server --features embed-frontend
 
+      # --- Build desktop app ---
+
       - name: Build desktop app
+        if: matrix.desktop
         run: cargo build --release --target ${{ matrix.target }} -p cellforge-app
         continue-on-error: true
 
-      # Ad-hoc sign on macOS so Gatekeeper doesn't flag it as damaged
+      # --- Package desktop: Linux AppImage ---
+
+      - name: Package AppImage (Linux)
+        if: matrix.desktop && runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          if [ ! -f target/${{ matrix.target }}/release/cellforge-app ]; then
+            echo "Desktop binary not found, skipping AppImage"
+            exit 0
+          fi
+
+          # Download linuxdeploy
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+
+          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x linuxdeploy-plugin-gtk.sh
+
+          # Build AppDir
+          mkdir -p AppDir/usr/bin
+          cp target/${{ matrix.target }}/release/cellforge-app AppDir/usr/bin/cellforge-app
+          chmod +x AppDir/usr/bin/cellforge-app
+
+          # Package
+          export DEPLOY_GTK_VERSION=3
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --plugin gtk \
+            --desktop-file assets/cellforge.desktop \
+            --icon-file assets/icon.png \
+            --output appimage || true
+
+          # Rename output
+          if ls CellForge-*.AppImage 1>/dev/null 2>&1; then
+            mv CellForge-*.AppImage ${{ matrix.artifact }}-desktop.AppImage
+          elif ls cellforge-app-*.AppImage 1>/dev/null 2>&1; then
+            mv cellforge-app-*.AppImage ${{ matrix.artifact }}-desktop.AppImage
+          fi
+
+      # --- Package desktop: macOS .dmg ---
+
+      - name: Package .dmg (macOS)
+        if: matrix.desktop && runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          if [ ! -f target/${{ matrix.target }}/release/cellforge-app ]; then
+            echo "Desktop binary not found, skipping .dmg"
+            exit 0
+          fi
+
+          # Generate .icns from PNG
+          mkdir -p icon.iconset
+          sips -z 16 16     assets/icon-1024.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     assets/icon-1024.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     assets/icon-1024.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     assets/icon-1024.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   assets/icon-1024.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   assets/icon-1024.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   assets/icon-1024.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   assets/icon-1024.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   assets/icon-1024.png --out icon.iconset/icon_512x512.png
+          sips -z 1024 1024 assets/icon-1024.png --out icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o icon.icns
+
+          # Create .app bundle
+          APP="build/CellForge.app/Contents"
+          mkdir -p "$APP/MacOS" "$APP/Resources"
+          cp target/${{ matrix.target }}/release/cellforge-app "$APP/MacOS/cellforge-app"
+          chmod +x "$APP/MacOS/cellforge-app"
+          cp icon.icns "$APP/Resources/icon.icns"
+
+          VERSION=${GITHUB_REF_NAME#v}
+          cat > "$APP/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDisplayName</key><string>CellForge</string>
+            <key>CFBundleExecutable</key><string>cellforge-app</string>
+            <key>CFBundleIdentifier</key><string>com.cellforge.app</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundleName</key><string>CellForge</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSMinimumSystemVersion</key><string>10.13</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # Ad-hoc codesign
+          codesign --force --sign - "build/CellForge.app"
+
+          # Create .dmg
+          brew install create-dmg
+          create-dmg \
+            --volname "CellForge" \
+            --volicon "icon.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "CellForge.app" 150 185 \
+            --app-drop-link 450 185 \
+            "${{ matrix.artifact }}-desktop.dmg" \
+            "build/CellForge.app" || true
+
+      # --- Sign server binary (macOS) ---
+
       - name: Sign binary (macOS)
         if: runner.os == 'macOS'
         run: codesign --force --sign - target/${{ matrix.target }}/release/${{ matrix.binary }}
 
-      # Rename to platform-specific artifact name
+      # --- Prepare server artifacts ---
+
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
           chmod +x ${{ matrix.artifact }}
-          if [ -f target/${{ matrix.target }}/release/cellforge-app ]; then
-            cp target/${{ matrix.target }}/release/cellforge-app ${{ matrix.artifact }}-desktop
-            chmod +x ${{ matrix.artifact }}-desktop
-          fi
 
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
@@ -125,7 +243,8 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.exe
-            ${{ matrix.artifact }}-desktop
+            ${{ matrix.artifact }}-desktop.AppImage
+            ${{ matrix.artifact }}-desktop.dmg
             ${{ matrix.artifact }}-desktop.exe
 
   release:

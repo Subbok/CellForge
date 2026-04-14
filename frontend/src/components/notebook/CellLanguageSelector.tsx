@@ -1,10 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-
-const LANG_COLORS: Record<string, string> = {
-  python: '#7aa2f7',
-  r: '#2d7dca',
-  julia: '#9558b2',
-};
+import { langColor as getLangColor } from '../../lib/languages';
 
 interface Props {
   language: string;
@@ -28,7 +23,7 @@ export function CellLanguageSelector({ language, onChange, availableLanguages }:
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  const color = LANG_COLORS[language] ?? '#7aa2f7';
+  const color = getLangColor(language);
 
   // If only 1 language available, just show label, no dropdown
   if (availableLanguages.length <= 1) {
@@ -56,7 +51,7 @@ export function CellLanguageSelector({ language, onChange, availableLanguages }:
       {open && (
         <div className="absolute bottom-full right-0 mb-1 bg-bg-secondary border border-border rounded-lg shadow-lg py-1 z-50 min-w-[100px]">
           {availableLanguages.map(lang => {
-            const langColor = LANG_COLORS[lang] ?? '#7aa2f7';
+            const langColor = getLangColor(lang);
             const isCurrent = lang === language;
             return (
               <button

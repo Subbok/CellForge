@@ -42,6 +42,15 @@ fn main() -> Result<()> {
         .with_inner_size(tao::dpi::LogicalSize::new(1400.0, 900.0))
         .build(&event_loop)?;
 
+    #[cfg(target_os = "linux")]
+    let _webview = {
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewBuilderExtUnix;
+        let vbox = window.default_vbox().unwrap();
+        WebViewBuilder::new().with_url(&url).build_gtk(vbox)?
+    };
+
+    #[cfg(not(target_os = "linux"))]
     let _webview = WebViewBuilder::new().with_url(&url).build(&window)?;
 
     event_loop.run(move |event, _, control_flow| {

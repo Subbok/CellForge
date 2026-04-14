@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileText, Cpu, Share2, Clock, Square, Plus, FolderOpen, Anvil, Settings, Shield, LogOut, Zap, X } from 'lucide-react';
 import { api } from '../services/api';
+import { langColor } from '../lib/languages';
 import type { Notebook } from '../lib/types';
 
 interface DashboardData {
@@ -50,12 +51,6 @@ function greetingKey(): string {
   if (h < 18) return 'home.goodAfternoon';
   return 'home.goodEvening';
 }
-
-const LANG_COLORS: Record<string, string> = {
-  python: '#7aa2f7',
-  r: '#2d7dca',
-  julia: '#9558b2',
-};
 
 export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdmin, onLogout }: Props) {
   const { t } = useTranslation();
@@ -323,13 +318,13 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
             <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">{t('home.runningKernels')}</h2>
             <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
               {kernels.map(k => {
-                const langColor = LANG_COLORS[k.language?.toLowerCase()] ?? '#7aa2f7';
+                const color = langColor(k.language ?? '');
                 return (
                   <div key={k.id} className="flex items-center gap-3 px-5 py-3.5 group">
                     <div className="relative">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                        style={{ backgroundColor: `${langColor}12` }}>
-                        <Cpu size={15} style={{ color: langColor }} />
+                        style={{ backgroundColor: `${color}12` }}>
+                        <Cpu size={15} style={{ color }} />
                       </div>
                       <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-bg-secondary ${k.status === 'busy' ? 'bg-warning animate-pulse' : 'bg-success'}`} />
                     </div>
@@ -339,7 +334,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
                       </span>
                       <div className="flex items-center gap-2 text-[11px] text-text-muted">
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                          style={{ backgroundColor: `${langColor}15`, color: langColor }}>
+                          style={{ backgroundColor: `${color}15`, color }}>
                           {k.language}
                         </span>
                         <span>{k.status}</span>
