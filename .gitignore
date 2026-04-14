@@ -37,5 +37,6 @@ cellforge_debug.typ
 __pycache__/
 *.pyc
 
-# Screenshots
+# Screenshots (but not assets/)
 *.png
+!assets/*.png
