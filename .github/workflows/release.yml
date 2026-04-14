@@ -124,6 +124,14 @@ jobs:
           chmod +x AppDir/usr/bin/cellforge-app
           cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/cellforge.png
 
+          # Copy webkit2gtk helper binaries (WebKitNetworkProcess, WebKitWebProcess)
+          # linuxdeploy-plugin-gtk copies the libraries but misses these helpers
+          WEBKIT_LIBEXEC=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
+          if [ -d "$WEBKIT_LIBEXEC" ]; then
+            mkdir -p AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
+            cp -rL "$WEBKIT_LIBEXEC"/* AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/
+          fi
+
           # Package with extracted linuxdeploy
           export DEPLOY_GTK_VERSION=3
           export PATH="$PWD:$PATH"
