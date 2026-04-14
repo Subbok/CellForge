@@ -63,21 +63,21 @@ local({{
     if (!exists("{var_name}", envir = .GlobalEnv)) {{
         cat("null")
     }} else {{
-        .bliss_df <- get("{var_name}", envir = .GlobalEnv)
-        if (is.data.frame(.bliss_df)) {{
-            .bliss_cols <- colnames(.bliss_df)
-            .bliss_dtypes <- sapply(.bliss_cols, function(c) class(.bliss_df[[c]])[1])
-            names(.bliss_dtypes) <- .bliss_cols
-            .bliss_head <- head(.bliss_df, 50)
-            .bliss_shape <- dim(.bliss_df)
-            .bliss_result <- list(
-                columns = .bliss_cols,
-                dtypes = as.list(.bliss_dtypes),
-                shape = .bliss_shape,
-                head = .bliss_head
+        .cf_df <- get("{var_name}", envir = .GlobalEnv)
+        if (is.data.frame(.cf_df)) {{
+            .cf_cols <- colnames(.cf_df)
+            .cf_dtypes <- sapply(.cf_cols, function(c) class(.cf_df[[c]])[1])
+            names(.cf_dtypes) <- .cf_cols
+            .cf_head <- head(.cf_df, 50)
+            .cf_shape <- dim(.cf_df)
+            .cf_result <- list(
+                columns = .cf_cols,
+                dtypes = as.list(.cf_dtypes),
+                shape = .cf_shape,
+                head = .cf_head
             )
             if (requireNamespace("jsonlite", quietly = TRUE)) {{
-                cat(jsonlite::toJSON(.bliss_result, auto_unbox = TRUE, dataframe = "rows", null = "null", na = "string"))
+                cat(jsonlite::toJSON(.cf_result, auto_unbox = TRUE, dataframe = "rows", null = "null", na = "string"))
             }} else {{
                 cat("null")
             }}

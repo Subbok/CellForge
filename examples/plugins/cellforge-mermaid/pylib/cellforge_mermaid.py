@@ -3,8 +3,8 @@ CellForge Mermaid plugin — Python helper.
 
 Usage in a notebook cell:
 
-    import bliss_mermaid
-    bliss_mermaid.diagram('''
+    import cellforge_mermaid
+    cellforge_mermaid.diagram('''
         graph TD
             A[Start] --> B{Decision}
             B -->|Yes| C[Do something]

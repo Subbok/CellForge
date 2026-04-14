@@ -1,4 +1,5 @@
 import { useState, useCallback, createContext, useContext, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle, Info, X } from 'lucide-react';
 
 // ── types ──
@@ -39,6 +40,7 @@ export function useModal(): ModalAPI {
 // ── provider + renderer ──
 
 export function ModalProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const [state, setState] = useState<ModalState>({ open: false, kind: 'alert', title: '', message: '' });
   const [inputVal, setInputVal] = useState('');
 
@@ -96,10 +98,10 @@ export function ModalProvider({ children }: { children: ReactNode }) {
 
             <div className="flex gap-2 justify-end">
               {state.kind === 'confirm' && (
-                <button onClick={() => close(false)} className="btn btn-md btn-ghost">Cancel</button>
+                <button onClick={() => close(false)} className="btn btn-md btn-ghost">{t('common.cancel')}</button>
               )}
               {state.kind === 'prompt' && (
-                <button onClick={() => close(null)} className="btn btn-md btn-ghost">Cancel</button>
+                <button onClick={() => close(null)} className="btn btn-md btn-ghost">{t('common.cancel')}</button>
               )}
               <button
                 onClick={() => {
@@ -109,7 +111,7 @@ export function ModalProvider({ children }: { children: ReactNode }) {
                 }}
                 className="btn btn-md btn-primary"
               >
-                OK
+                {t('common.ok')}
               </button>
             </div>
           </div>

@@ -287,7 +287,7 @@ print("hello")
     }
 
     #[test]
-    fn bliss_world_missing_file_returns_not_found() {
+    fn cf_world_missing_file_returns_not_found() {
         let world = CellForgeWorld::new("Hello", &HashMap::new(), &HashMap::new())
             .expect("world creation should succeed");
         let fake_id = FileId::new(None, VirtualPath::new("nonexistent.png"));
@@ -296,7 +296,7 @@ print("hello")
     }
 
     #[test]
-    fn bliss_world_source_returns_main() {
+    fn cf_world_source_returns_main() {
         let src = "Test content";
         let world = CellForgeWorld::new(src, &HashMap::new(), &HashMap::new()).unwrap();
         let main_src = world

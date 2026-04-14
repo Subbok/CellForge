@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { setLanguage } from '../lib/i18n';
 import { api } from '../services/api';
 import { useUIStore } from '../stores/uiStore';
 import { refreshPlugins } from '../plugins/loader';
@@ -12,6 +14,7 @@ interface Props {
 }
 
 export function Settings({ onBack, user }: Props) {
+  const { t, i18n } = useTranslation();
   const [templates, setTemplates] = useState<{ name: string; variables: { key: string; default_value: string }[]; assets?: string[] }[]>([]);
   const [showUpload, setShowUpload] = useState(false);
   const [uploadName, setUploadName] = useState('');
@@ -58,28 +61,51 @@ export function Settings({ onBack, user }: Props) {
       <header className="sticky top-0 z-20 border-b border-border/60 bg-bg/80 backdrop-blur-xl">
         <div className="max-w-3xl mx-auto px-6 h-14 flex items-center gap-3">
           <button onClick={onBack} className="btn btn-sm btn-ghost gap-1.5">
-            <ArrowLeft size={14} /> Back
+            <ArrowLeft size={14} /> {t('common.back')}
           </button>
           <div className="w-px h-5 bg-border/50" />
-          <h1 className="font-semibold text-text text-sm">Settings</h1>
+          <h1 className="font-semibold text-text text-sm">{t('settings.title')}</h1>
         </div>
       </header>
 
       <div className="relative max-w-3xl mx-auto px-6 py-8 space-y-6">
         {/* ── Appearance ── */}
         <div className="flex items-center gap-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Appearance</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">per user</span>
+          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.appearance')}</h3>
+          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.perUser')}</span>
         </div>
 
         <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">Accent color</h2>
+          <h2 className="section-title">{t('settings.accentColor')}</h2>
           <p className="section-desc">
-            Tints selection highlights, active cell bars, and primary buttons.
-            Pick a swatch or drop in any 6-digit hex.
+            {t('settings.accentDescription')}
           </p>
           <AccentPicker value={accentColor} onChange={setAccentColor} />
         </section>
+
+        {/* Language */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-text">{t('settings.language')}</h3>
+          <p className="text-xs text-text-muted">{t('settings.languageDescription')}</p>
+          <div className="flex gap-2">
+            {[
+              { code: 'en', label: 'English' },
+              { code: 'pl', label: 'Polski' },
+            ].map(lang => (
+              <button
+                key={lang.code}
+                onClick={() => setLanguage(lang.code)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                  i18n.language === lang.code
+                    ? 'bg-accent/15 border-accent/40 text-accent'
+                    : 'bg-bg-elevated border-border text-text-secondary hover:border-border/80'
+                }`}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
           <ThemesSection isAdminProp={Boolean(user?.is_admin)} />
@@ -87,16 +113,14 @@ export function Settings({ onBack, user }: Props) {
 
         {/* ── Editor ── */}
         <div className="flex items-center gap-2 pt-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Editor</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">per user</span>
+          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.editor')}</h3>
+          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.perUser')}</span>
         </div>
 
         <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">Reactive Execution</h2>
+          <h2 className="section-title">{t('settings.reactiveExecution')}</h2>
           <p className="section-desc">
-            When enabled, CellForge automatically detects dependencies between cells.
-            Changing a variable in one cell will immediately re-execute all other cells that depend on it,
-            ensuring consistency across the entire notebook.
+            {t('settings.reactiveDescription')}
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -107,87 +131,83 @@ export function Settings({ onBack, user }: Props) {
                   : 'bg-bg-elevated border-border text-text-muted hover:border-text-muted/30'
               }`}
             >
-              {reactive ? 'Enabled (Default)' : 'Disabled'}
+              {reactive ? t('settings.reactiveEnabled') : t('settings.reactiveDisabled')}
             </button>
             <span className="text-xs text-text-muted italic">
-              {reactive ? 'Notebook reacts to every change.' : 'Cells are only executed manually.'}
+              {reactive ? t('settings.reactiveEnabledDesc') : t('settings.reactiveDisabledDesc')}
             </span>
           </div>
         </section>
 
         <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">Auto-save</h2>
+          <h2 className="section-title">{t('settings.autoSave')}</h2>
           <div className="flex items-center gap-3">
             <select
               value={autoSave}
               onChange={e => setAutoSave(Number(e.target.value))}
               className="field w-auto"
             >
-              <option value={0}>Disabled</option>
-              <option value={10}>Every 10 seconds</option>
-              <option value={30}>Every 30 seconds</option>
-              <option value={60}>Every 1 minute</option>
-              <option value={120}>Every 2 minutes</option>
-              <option value={300}>Every 5 minutes</option>
+              <option value={0}>{t('settings.autoSaveDisabled')}</option>
+              <option value={10}>{t('settings.autoSave10s')}</option>
+              <option value={30}>{t('settings.autoSave30s')}</option>
+              <option value={60}>{t('settings.autoSave1m')}</option>
+              <option value={120}>{t('settings.autoSave2m')}</option>
+              <option value={300}>{t('settings.autoSave5m')}</option>
             </select>
           </div>
         </section>
 
         <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">AI Assistant</h2>
+          <h2 className="section-title">{t('settings.aiAssistant')}</h2>
           <p className="section-desc">
-            Configure your AI provider for cell explanations, error fixes, and code generation.
-            Your API key is stored locally and never sent to CellForge servers.
+            {t('settings.aiDescription')}
           </p>
           <AiSettings />
         </section>
 
         {/* ── Export ── */}
         <div className="flex items-center gap-2 pt-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Export</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">system-wide</span>
+          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.exportSection')}</h3>
+          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.systemWide')}</span>
         </div>
 
         <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">PDF Export Templates</h2>
+          <h2 className="section-title">{t('settings.pdfTemplates')}</h2>
           <p className="section-desc">
-            Typst templates with optional assets (images). Use{' '}
-            <code className="bg-bg-elevated px-1 rounded">{'{{content}}'}</code> for notebook content,{' '}
-            <code className="bg-bg-elevated px-1 rounded">{'{{title}}'}</code> for title.
-            Define variables in a <code className="bg-bg-elevated px-1 rounded">#let config = (...)</code> block.
+            {t('settings.templatesDescription')}
           </p>
 
           <div className="space-y-1">
-            {templates.map(t => (
-              <div key={t.name}
+            {templates.map(tpl => (
+              <div key={tpl.name}
                 className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border">
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm text-text">{t.name}</span>
-                  {t.variables.length > 0 && (
+                  <span className="text-sm text-text">{tpl.name}</span>
+                  {tpl.variables.length > 0 && (
                     <span className="text-xs text-text-muted ml-2">
-                      ({t.variables.map(v => v.key).join(', ')})
+                      ({tpl.variables.map(v => v.key).join(', ')})
                     </span>
                   )}
-                  {t.assets && t.assets.length > 0 && (
+                  {tpl.assets && tpl.assets.length > 0 && (
                     <span className="text-xs text-text-muted ml-2">
-                      · {t.assets.length} asset{t.assets.length > 1 ? 's' : ''}
+                      · {tpl.assets.length} asset{tpl.assets.length > 1 ? 's' : ''}
                     </span>
                   )}
                 </div>
-                <label className="btn btn-sm btn-ghost cursor-pointer" title="Add assets (images, fonts)">
+                <label className="btn btn-sm btn-ghost cursor-pointer" title={t('settings.addAssets')}>
                   <Upload size={12} />
                   <input type="file" multiple className="hidden" onChange={async e => {
                     const files = Array.from(e.target.files ?? []);
                     if (!files.length) return;
                     try {
-                      await api.uploadTemplateAssets(t.name, files);
+                      await api.uploadTemplateAssets(tpl.name, files);
                       loadTemplates();
                     } catch { /* ignored */ }
                     e.target.value = '';
                   }} />
                 </label>
-                {t.name !== 'default' && (
-                  <button onClick={() => deleteTemplate(t.name)}
+                {tpl.name !== 'default' && (
+                  <button onClick={() => deleteTemplate(tpl.name)}
                     className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error">
                     <Trash2 size={14} />
                   </button>
@@ -198,26 +218,26 @@ export function Settings({ onBack, user }: Props) {
 
           {!showUpload ? (
             <button onClick={() => setShowUpload(true)} className="btn btn-md btn-secondary mt-3">
-              <Upload size={14} /> Upload template
+              <Upload size={14} /> {t('settings.uploadTemplate')}
             </button>
           ) : (
             <div className="mt-3 p-4 border border-border rounded-lg space-y-3">
               <input
                 value={uploadName}
                 onChange={e => setUploadName(e.target.value)}
-                placeholder="Template name (e.g. lab-report)"
+                placeholder={t('settings.templateName')}
                 className="field"
               />
 
               <div>
-                <label className="text-xs text-text-muted block mb-1">Template file (.typ)</label>
+                <label className="text-xs text-text-muted block mb-1">{t('settings.templateFile')}</label>
                 <input ref={typInputRef} type="file" accept=".typ"
                   onChange={e => setUploadTyp(e.target.files?.[0] ?? null)}
                   className="text-xs text-text-secondary" />
               </div>
 
               <div>
-                <label className="text-xs text-text-muted block mb-1">Assets (images, fonts — optional)</label>
+                <label className="text-xs text-text-muted block mb-1">{t('settings.assetsOptional')}</label>
                 <input ref={assetInputRef} type="file" multiple
                   onChange={e => setUploadAssets(Array.from(e.target.files ?? []))}
                   className="text-xs text-text-secondary" />
@@ -234,10 +254,10 @@ export function Settings({ onBack, user }: Props) {
                   disabled={!uploadName.trim() || !uploadTyp}
                   className="btn btn-md btn-primary"
                 >
-                  Upload
+                  {t('common.upload')}
                 </button>
                 <button onClick={() => setShowUpload(false)} className="btn btn-md btn-ghost">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -245,11 +265,11 @@ export function Settings({ onBack, user }: Props) {
         </section>
 
         {/* ── Account & Users ── */}
-        <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pt-2">Account</h3>
+        <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pt-2">{t('settings.account')}</h3>
 
         <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">Password</h2>
-          <p className="section-desc">Change your password.</p>
+          <h2 className="section-title">{t('auth.password')}</h2>
+          <p className="section-desc">{t('settings.changePasswordDesc')}</p>
           <ChangePassword />
         </section>
 
@@ -261,8 +281,8 @@ export function Settings({ onBack, user }: Props) {
 
         {/* ── Extensions ── */}
         <div className="flex items-center gap-2 pt-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Extensions</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">per scope</span>
+          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.extensions')}</h3>
+          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.perScope')}</span>
         </div>
 
         <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
@@ -271,14 +291,14 @@ export function Settings({ onBack, user }: Props) {
 
         {/* ── About ── */}
         <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">About</h2>
+          <h2 className="section-title">{t('settings.about')}</h2>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
               <Puzzle size={20} className="text-accent" />
             </div>
             <div>
               <p className="text-sm font-medium text-text">CellForge</p>
-              <p className="text-[11px] text-text-muted">v0.3.0 — Notebook IDE. Rust + React + Typst.</p>
+              <p className="text-[11px] text-text-muted">{t('settings.aboutDescription')}</p>
             </div>
           </div>
         </section>
@@ -305,6 +325,7 @@ const ACCENT_SWATCHES: AccentSwatch[] = [
 ];
 
 function AccentPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(value);
 
   // keep draft in sync when an outside update lands (e.g. swatch click)
@@ -345,7 +366,7 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (hex: stri
 
       {/* hex input + live preview */}
       <div className="flex items-center gap-3">
-        <label className="text-xs text-text-muted shrink-0">Custom hex:</label>
+        <label className="text-xs text-text-muted shrink-0">{t('settings.customHex')}</label>
         <div className="flex items-center gap-2 bg-bg-elevated border border-border rounded-lg px-2 py-1">
           <span
             className="w-4 h-4 rounded-sm border border-border"
@@ -362,13 +383,13 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (hex: stri
             className="w-24 bg-transparent outline-none text-xs font-mono text-text"
           />
         </div>
-        <span className="text-xs text-text-muted">Preview →</span>
+        <span className="text-xs text-text-muted">{t('settings.preview')}</span>
         <div
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg border"
           style={{ borderColor: value, background: `${value}10` }}
         >
           <span className="w-2 h-2 rounded-full" style={{ background: value }} />
-          <span className="text-xs font-medium" style={{ color: value }}>Active cell</span>
+          <span className="text-xs font-medium" style={{ color: value }}>{t('settings.activeCell')}</span>
         </div>
       </div>
     </div>
@@ -390,6 +411,7 @@ function isThemeOnly(entry: PluginEntry): boolean {
 // ── Themes section ──
 
 function ThemesSection({ isAdminProp }: { isAdminProp: boolean }) {
+  const { t } = useTranslation();
   const modal = useModal();
   const plugins = useUIStore(s => s.plugins);
   const allowUserPlugins = useUIStore(s => s.allowUserPlugins);
@@ -429,11 +451,9 @@ function ThemesSection({ isAdminProp }: { isAdminProp: boolean }) {
 
   return (
     <section>
-      <h2 className="section-title">Themes</h2>
+      <h2 className="section-title">{t('settings.themes')}</h2>
       <p className="section-desc">
-        Pick a color theme. Built-in Crisp is always available; install more by
-        uploading a <code className="bg-bg-elevated px-1 rounded">.zip</code> with
-        a theme-only <code className="bg-bg-elevated px-1 rounded">plugin.json</code>.
+        {t('settings.themesDescription')}
       </p>
 
       {error && (
@@ -445,7 +465,7 @@ function ThemesSection({ isAdminProp }: { isAdminProp: boolean }) {
       {/* installed theme plugins */}
       {themePlugins.length > 0 && (
         <div className="mt-4 space-y-1">
-          <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">Installed theme plugins</div>
+          <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">{t('settings.installedThemePlugins')}</div>
           {themePlugins.map(entry => (
             <div
               key={`${entry.scope}-${entry.manifest.name}`}
@@ -460,14 +480,14 @@ function ThemesSection({ isAdminProp }: { isAdminProp: boolean }) {
                     ? 'bg-warning/15 text-warning'
                     : 'bg-accent/15 text-accent'
                 }`}>
-                  {entry.scope}
+                  {entry.scope === 'system' ? t('settings.system') : t('settings.user')}
                 </span>
               </div>
               {((entry.scope === 'user') || (entry.scope === 'system' && isAdminProp)) && (
                 <button
                   onClick={() => removeTheme(entry)}
                   className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error shrink-0"
-                  title="Remove theme"
+                  title={t('settings.removeTheme')}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -485,7 +505,7 @@ function ThemesSection({ isAdminProp }: { isAdminProp: boolean }) {
             disabled={uploading}
             className="btn btn-sm btn-secondary"
           >
-            <Upload size={12} /> {uploading ? 'Uploading…' : 'Upload theme'}
+            <Upload size={12} /> {uploading ? t('settings.uploading') : t('settings.uploadTheme')}
           </button>
           <input
             ref={fileInputRef}
@@ -503,25 +523,26 @@ function ThemesSection({ isAdminProp }: { isAdminProp: boolean }) {
 // ── Theme picker (cards) ──
 
 function ThemePicker() {
+  const { t } = useTranslation();
   const availableThemes = useUIStore(s => s.availableThemes);
   const currentThemeId = useUIStore(s => s.currentThemeId);
   const setCurrentThemeId = useUIStore(s => s.setCurrentThemeId);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {availableThemes.map(t => {
-        const active = t.id === currentThemeId;
+      {availableThemes.map(th => {
+        const active = th.id === currentThemeId;
         const preview = {
-          bg: t.vars['--color-bg'] ?? '#13141b',
-          elevated: t.vars['--color-bg-elevated'] ?? '#242736',
-          border: t.vars['--color-border'] ?? '#3f4154',
-          accent: t.vars['--color-accent'] ?? '#7a99ff',
-          text: t.vars['--color-text'] ?? '#ebedf2',
+          bg: th.vars['--color-bg'] ?? '#13141b',
+          elevated: th.vars['--color-bg-elevated'] ?? '#242736',
+          border: th.vars['--color-border'] ?? '#3f4154',
+          accent: th.vars['--color-accent'] ?? '#7a99ff',
+          text: th.vars['--color-text'] ?? '#ebedf2',
         };
         return (
           <button
-            key={t.id}
-            onClick={() => setCurrentThemeId(t.id)}
+            key={th.id}
+            onClick={() => setCurrentThemeId(th.id)}
             className={`flex items-center gap-3 p-3 rounded-lg border transition-colors text-left
               ${active
                 ? 'border-accent ring-2 ring-accent/25'
@@ -539,9 +560,9 @@ function ThemePicker() {
               />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-text truncate">{t.name}</div>
+              <div className="text-sm font-medium text-text truncate">{th.name}</div>
               <div className="text-[10px] text-text-muted uppercase tracking-wider">
-                {t.source === 'builtin' ? 'Built-in' : `${t.source} plugin · ${t.plugin ?? ''}`}
+                {th.source === 'builtin' ? t('settings.builtIn') : `${th.source} plugin · ${th.plugin ?? ''}`}
               </div>
             </div>
             {active && (
@@ -557,6 +578,7 @@ function ThemePicker() {
 // ── Plugins section ──
 
 function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
+  const { t } = useTranslation();
   const modal = useModal();
   const plugins = useUIStore(s => s.plugins);
   const allowUserPlugins = useUIStore(s => s.allowUserPlugins);
@@ -621,12 +643,9 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
 
   return (
     <section>
-      <h2 className="section-title">Plugins</h2>
+      <h2 className="section-title">{t('settings.plugins')}</h2>
       <p className="section-desc">
-        Extend CellForge with Python helpers, custom widgets, and more.
-        Upload a <code className="bg-bg-elevated px-1 rounded">.zip</code> containing
-        a <code className="bg-bg-elevated px-1 rounded">plugin.json</code> manifest.
-        Theme-only plugins are managed in the Themes section above.
+        {t('settings.pluginsDescription')}
       </p>
 
       {error && (
@@ -640,16 +659,16 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
             <Shield size={14} />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-medium text-text">Allow users to install plugins</div>
+            <div className="text-xs font-medium text-text">{t('settings.allowUserPlugins')}</div>
             <div className="text-[11px] text-text-muted">
-              When off, only admins can install plugins (system-wide).
+              {t('settings.allowUserPluginsDesc')}
             </div>
           </div>
           <button
             onClick={() => toggleAllowUser(!allowUserPlugins)}
             className={`btn btn-sm ${allowUserPlugins ? 'btn-primary' : 'btn-secondary'}`}
           >
-            {allowUserPlugins ? 'Enabled' : 'Disabled'}
+            {allowUserPlugins ? t('settings.enabled') : t('settings.reactiveDisabled')}
           </button>
         </div>
       )}
@@ -667,7 +686,7 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
                     : 'text-text-muted hover:bg-bg-hover'
                 }`}
               >
-                User
+                {t('settings.user')}
               </button>
               <button
                 onClick={() => setUploadScope('system')}
@@ -677,7 +696,7 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
                     : 'text-text-muted hover:bg-bg-hover'
                 }`}
               >
-                System
+                {t('settings.system')}
               </button>
             </div>
           )}
@@ -687,11 +706,11 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
             disabled={uploading}
             className="btn btn-md btn-secondary"
           >
-            <Upload size={14} /> {uploading ? 'Uploading…' : 'Upload plugin'}
+            <Upload size={14} /> {uploading ? t('settings.uploading') : t('settings.uploadPlugin')}
           </button>
           <button
             onClick={refreshPlugins}
-            title="Refresh plugin list"
+            title={t('settings.refreshPlugins')}
             className="btn btn-md btn-ghost"
           >
             <RotateCcw size={14} />
@@ -706,7 +725,7 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
         </div>
       ) : (
         <div className="mb-4 px-3 py-2 bg-bg-elevated/60 border border-border rounded-lg text-xs text-text-muted">
-          Plugin installation is disabled. Ask an admin to enable it or to install plugins system-wide.
+          {t('settings.pluginsDisabled')}
         </div>
       )}
 
@@ -715,7 +734,7 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
         {functionalPlugins.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-text-muted border border-dashed border-border rounded-lg">
             <Puzzle size={16} className="mx-auto mb-1 opacity-50" />
-            No plugins installed.
+            {t('settings.noPlugins')}
           </div>
         ) : (
           functionalPlugins.map(entry => (
@@ -736,7 +755,7 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
                       ? 'bg-warning/15 text-warning'
                       : 'bg-accent/15 text-accent'
                   }`}>
-                    {entry.scope}
+                    {entry.scope === 'system' ? t('settings.system') : t('settings.user')}
                   </span>
                   {entry.manifest.version && (
                     <span className="text-[10px] text-text-muted">v{entry.manifest.version}</span>
@@ -756,7 +775,7 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
                 <button
                   onClick={() => removePlugin(entry)}
                   className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error shrink-0"
-                  title="Remove plugin"
+                  title={t('settings.removePlugin')}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -782,6 +801,7 @@ const AI_PROVIDERS = [
 ];
 
 function AiSettings() {
+  const { t } = useTranslation();
   const provider = useUIStore(s => s.aiProvider);
   const apiKey = useUIStore(s => s.aiApiKey);
   const model = useUIStore(s => s.aiModel);
@@ -798,7 +818,7 @@ function AiSettings() {
   return (
     <div className="space-y-3 max-w-md">
       <div>
-        <label className="text-xs text-text-muted block mb-1">Provider</label>
+        <label className="text-xs text-text-muted block mb-1">{t('settings.provider')}</label>
         <select
           value={provider}
           onChange={e => {
@@ -817,7 +837,7 @@ function AiSettings() {
 
       {needsKey && (
         <div>
-          <label className="text-xs text-text-muted block mb-1">API Key</label>
+          <label className="text-xs text-text-muted block mb-1">{t('settings.apiKey')}</label>
           <input
             type="password"
             value={apiKey}
@@ -830,7 +850,7 @@ function AiSettings() {
 
       {needsUrl && (
         <div>
-          <label className="text-xs text-text-muted block mb-1">API Base URL</label>
+          <label className="text-xs text-text-muted block mb-1">{t('settings.apiBaseUrl')}</label>
           <input
             value={baseUrl}
             onChange={e => setBaseUrl(e.target.value)}
@@ -841,7 +861,7 @@ function AiSettings() {
       )}
 
       <div>
-        <label className="text-xs text-text-muted block mb-1">Model</label>
+        <label className="text-xs text-text-muted block mb-1">{t('settings.model')}</label>
         <input
           value={model || providerInfo.defaultModel}
           onChange={e => setModel(e.target.value)}
@@ -852,14 +872,15 @@ function AiSettings() {
 
       <div className="text-[10px] text-text-muted">
         {provider === 'ollama'
-          ? 'Ollama runs locally — no API key needed. Make sure Ollama is running.'
-          : 'Your key is stored in your browser only (localStorage). Never sent to CellForge servers.'}
+          ? t('settings.ollamaNote')
+          : t('settings.apiKeyNote')}
       </div>
     </div>
   );
 }
 
 function ChangePassword() {
+  const { t } = useTranslation();
   const [newPass, setNewPass] = useState('');
   const [confirm, setConfirm] = useState('');
   const [msg, setMsg] = useState('');
@@ -867,12 +888,12 @@ function ChangePassword() {
 
   async function submit() {
     setMsg(''); setErr('');
-    if (newPass.length < 4) { setErr('Password must be at least 4 characters'); return; }
-    if (newPass !== confirm) { setErr('Passwords do not match'); return; }
+    if (newPass.length < 4) { setErr(t('settings.passwordMinLength')); return; }
+    if (newPass !== confirm) { setErr(t('settings.passwordsMismatch')); return; }
     try {
       const res = await api.changePassword(newPass);
-      if (res.ok) { setMsg('Password changed'); setNewPass(''); setConfirm(''); }
-      else setErr(res.error ?? 'Failed');
+      if (res.ok) { setMsg(t('settings.passwordChanged')); setNewPass(''); setConfirm(''); }
+      else setErr(res.error ?? t('settings.failed'));
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
   }
 
@@ -880,23 +901,24 @@ function ChangePassword() {
     <div className="flex flex-col gap-2 max-w-xs">
       <input
         type="password" value={newPass} onChange={e => setNewPass(e.target.value)}
-        placeholder="New password" className="field"
+        placeholder={t('settings.newPassword')} className="field"
       />
       <input
         type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-        placeholder="Confirm password" className="field"
+        placeholder={t('settings.confirmPassword')} className="field"
         onKeyDown={e => { if (e.key === 'Enter') submit(); }}
       />
       {err && <div className="text-xs text-error">{err}</div>}
       {msg && <div className="text-xs text-success">{msg}</div>}
       <button onClick={submit} disabled={!newPass || !confirm} className="btn btn-md btn-primary w-fit">
-        <Key size={14} /> Change password
+        <Key size={14} /> {t('settings.changePassword')}
       </button>
     </div>
   );
 }
 
 function UserManagement() {
+  const { t } = useTranslation();
   const modal = useModal();
   const [users, setUsers] = useState<{ username: string; display_name?: string; is_admin?: boolean }[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -924,19 +946,19 @@ function UserManagement() {
   }
 
   async function resetPassword(username: string) {
-    const newPass = await modal.prompt('Reset password', `New password for @${username}:`, 'New password');
+    const newPass = await modal.prompt(t('settings.resetPassword'), `${t('settings.newPassword')} @${username}:`, t('settings.newPassword'));
     if (!newPass) return;
     try {
       const res = await api.changePassword(newPass, username);
-      if (res.ok) await modal.alert('Password changed', `Password for @${username} has been updated.`, 'success');
-      else await modal.alert('Error', res.error ?? 'Failed', 'error');
-    } catch (e: unknown) { await modal.alert('Error', e instanceof Error ? e.message : String(e), 'error'); }
+      if (res.ok) await modal.alert(t('settings.passwordChanged'), t('settings.passwordUpdated', { username }), 'success');
+      else await modal.alert(t('common.error'), res.error ?? t('settings.failed'), 'error');
+    } catch (e: unknown) { await modal.alert(t('common.error'), e instanceof Error ? e.message : String(e), 'error'); }
   }
 
   return (
     <section>
-      <h2 className="section-title">Users</h2>
-      <p className="section-desc">Manage accounts and reset passwords. Only admins see this.</p>
+      <h2 className="section-title">{t('settings.users')}</h2>
+      <p className="section-desc">{t('settings.usersDesc')}</p>
 
       <div className="space-y-1 mb-3">
         {users.map(u => (
@@ -945,15 +967,15 @@ function UserManagement() {
             <div className="flex-1 min-w-0">
               <span className="text-sm text-text">{u.display_name || u.username}</span>
               <span className="text-xs text-text-muted ml-2">@{u.username}</span>
-              {u.is_admin && <span className="text-[10px] text-accent ml-2 font-medium">admin</span>}
+              {u.is_admin && <span className="text-[10px] text-accent ml-2 font-medium">{t('settings.admin')}</span>}
             </div>
             <button onClick={() => resetPassword(u.username)}
-              className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-accent" title="Reset password">
+              className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-accent" title={t('settings.resetPassword')}>
               <Key size={14} />
             </button>
             {!u.is_admin && (
               <button onClick={() => remove(u.username)}
-                className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error" title="Delete user">
+                className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error" title={t('settings.deleteUser')}>
                 <Trash2 size={14} />
               </button>
             )}
@@ -963,20 +985,20 @@ function UserManagement() {
 
       {!showAdd ? (
         <button onClick={() => setShowAdd(true)} className="btn btn-md btn-secondary">
-          <Upload size={14} /> Add user
+          <Upload size={14} /> {t('settings.addUser')}
         </button>
       ) : (
         <div className="p-4 border border-border rounded-lg space-y-2">
-          <input value={newUser} onChange={e => setNewUser(e.target.value)} placeholder="Username" className="field" />
-          <input value={newDisplay} onChange={e => setNewDisplay(e.target.value)} placeholder="Display name (optional)" className="field" />
-          <input type="password" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="Password" className="field" />
+          <input value={newUser} onChange={e => setNewUser(e.target.value)} placeholder={t('auth.username')} className="field" />
+          <input value={newDisplay} onChange={e => setNewDisplay(e.target.value)} placeholder={t('settings.displayNameOptional')} className="field" />
+          <input type="password" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder={t('auth.password')} className="field" />
           {error && <div className="text-xs text-error">{error}</div>}
           <div className="flex gap-2">
             <button onClick={addUser} disabled={!newUser || !newPass} className="btn btn-md btn-primary">
-              Create
+              {t('common.create')}
             </button>
             <button onClick={() => setShowAdd(false)} className="btn btn-md btn-ghost">
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>

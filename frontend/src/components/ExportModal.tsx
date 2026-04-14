@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { exportNotebookHtml } from '../services/exportHtml';
 import { useNotebookStore } from '../stores/notebookStore';
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export function ExportModal({ onClose }: Props) {
+  const { t } = useTranslation();
   const [format, setFormat] = useState<Format>('pdf');
   const [templates, setTemplates] = useState<(TemplateInfo & { assets?: string[] })[]>([]);
   const [selected, setSelected] = useState('default');
@@ -152,14 +154,14 @@ export function ExportModal({ onClose }: Props) {
       <div className="modal-panel w-[480px] max-h-[85vh] flex flex-col"
         onClick={e => e.stopPropagation()}>
         <div className="px-6 pt-6 pb-3 shrink-0">
-          <h3 className="text-base font-semibold text-text">Export notebook</h3>
+          <h3 className="text-base font-semibold text-text">{t('export.exportNotebook')}</h3>
         </div>
 
         {/* format tabs — built-in + plugin-contributed */}
         <div className="px-6 pb-3 flex gap-2 flex-wrap">
           {[
-            { id: 'pdf', label: 'PDF (Typst)' },
-            { id: 'html', label: 'HTML' },
+            { id: 'pdf', label: t('export.pdfTypst') },
+            { id: 'html', label: t('export.html') },
             ...pluginFormats.map(f => ({ id: f.id, label: f.label })),
           ].map(f => (
             <button key={f.id} onClick={() => setFormat(f.id)}
@@ -176,7 +178,7 @@ export function ExportModal({ onClose }: Props) {
           <div className="px-6 pb-3 overflow-y-auto flex-1 space-y-4">
             {templates.length > 0 && (
               <div>
-                <label className="text-xs text-text-muted block mb-1.5">Template</label>
+                <label className="text-xs text-text-muted block mb-1.5">{t('export.template')}</label>
                 <div className="space-y-1">
                   {templates.map(t => (
                     <button key={t.name} onClick={() => setSelected(t.name)}
@@ -197,7 +199,7 @@ export function ExportModal({ onClose }: Props) {
 
             {tmplVars.length > 0 && (
               <div>
-                <label className="text-xs text-text-muted block mb-1.5">Variables</label>
+                <label className="text-xs text-text-muted block mb-1.5">{t('export.variables')}</label>
                 <div className="space-y-2">
                   {tmplVars.map(v => {
                     const isImageVar = /logo|image|icon|img/i.test(v.key)
@@ -218,7 +220,7 @@ export function ExportModal({ onClose }: Props) {
                             onChange={e => setVars(prev => ({ ...prev, [v.key]: e.target.value }))}
                             className="field flex-1"
                           >
-                            <option value="">(no image)</option>
+                            <option value="">{t('export.noImage')}</option>
                             {imageAssets.map(a => (
                               <option key={a} value={a}>{a}</option>
                             ))}
@@ -246,10 +248,10 @@ export function ExportModal({ onClose }: Props) {
         <div className="px-6 pb-5 pt-2 border-t border-border flex gap-2 shrink-0">
           <button onClick={doExport} disabled={exporting} className="btn btn-lg btn-primary flex-1">
             {exporting ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
-            {exporting ? 'Exporting...' : `Export ${format.toUpperCase()}`}
+            {exporting ? t('export.exporting') : t('export.exportFormat', { format: format.toUpperCase() })}
           </button>
           <button onClick={onClose} className="btn btn-lg btn-ghost">
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       </div>

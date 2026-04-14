@@ -1,5 +1,5 @@
 {
-  "name": "bliss-demo",
+  "name": "cellforge-demo",
   "version": "0.1.0",
   "display_name": "Demo Plugin (all features)",
   "description": "Exercises every plugin contribution type. For testing only.",
@@ -27,11 +27,11 @@
       }
     ],
 
-    "pylib": ["bliss_demo.py"],
+    "pylib": ["cellforge_demo.py"],
 
     "widgets": [
       {
-        "tag_name": "bliss-demo-chart",
+        "tag_name": "cellforge-demo-chart",
         "module": "plugin.js",
         "stateful": false
       }
@@ -42,7 +42,7 @@
         "id": "demo-hello",
         "label": "Demo",
         "icon": "sparkles",
-        "command": "bliss-demo.hello",
+        "command": "cellforge-demo.hello",
         "position": "right"
       }
     ],
@@ -61,14 +61,14 @@
         "id": "demo-cell-info",
         "label": "Info",
         "icon": "info",
-        "command": "bliss-demo.cell-info"
+        "command": "cellforge-demo.cell-info"
       }
     ],
 
     "keybindings": [
       {
         "key": "ctrl+shift+d",
-        "command": "bliss-demo.hello",
+        "command": "cellforge-demo.hello",
         "command_mode_only": true
       }
     ],
@@ -78,7 +78,7 @@
         "id": "demo-txt",
         "label": "Plain Text (demo)",
         "extension": "txt",
-        "command": "bliss-demo.export-txt"
+        "command": "cellforge-demo.export-txt"
       }
     ],
 
@@ -87,7 +87,7 @@
         "id": "demo-status",
         "label": "Demo plugin active",
         "position": "right",
-        "command": "bliss-demo.hello"
+        "command": "cellforge-demo.hello"
       }
     ]
   }

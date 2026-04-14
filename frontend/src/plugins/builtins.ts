@@ -121,7 +121,7 @@ function ensureMermaid() {
 
 let mermaidCounter = 0;
 
-// ── Viz helpers (bliss_mo) ──
+// ── Viz helpers ──
 
 const PALETTE = [
   '#7a99ff', '#ff79c6', '#50fa7b', '#ffb86c', '#bd93f9',
@@ -427,7 +427,7 @@ export function registerBuiltinRenderers() {
   registerMimeRenderer('application/vnd.cellforge.mermaid', async (container, data) => {
     const d = data as MermaidData;
     const mermaid = await ensureMermaid();
-    const id = `bliss-mermaid-${++mermaidCounter}`;
+    const id = `cf-mermaid-${++mermaidCounter}`;
     try {
       const { svg } = await mermaid.render(id, d.source);
       container.innerHTML = svg;
@@ -445,7 +445,7 @@ export function registerBuiltinRenderers() {
     }
   });
 
-  // bliss_mo visualizations — one MIME type, dispatched by `kind`
+  // CellForge visualizations — one MIME type, dispatched by `kind`
   registerMimeRenderer('application/vnd.cellforge.viz', (container, data) => {
     const d = data as VizData;
     switch (d.kind) {
@@ -458,7 +458,7 @@ export function registerBuiltinRenderers() {
       case 'progress': renderProgress(container, d); break;
       case 'diagram':  renderDiagram(container, d); break;
       default:
-        container.innerHTML = `<div style="color:var(--color-text-muted);font-size:12px;">Unknown bliss_mo kind: ${(d as VizBase).kind}</div>`;
+        container.innerHTML = `<div style="color:var(--color-text-muted);font-size:12px;">Unknown viz kind: ${(d as VizBase).kind}</div>`;
     }
   });
 }

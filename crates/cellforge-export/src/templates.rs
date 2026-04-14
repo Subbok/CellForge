@@ -6,9 +6,7 @@ use std::path::PathBuf;
 /// Where templates live — ~/.config/cellforge/templates/
 /// Each template is a directory containing template.typ + any assets (images etc)
 pub fn templates_dir() -> PathBuf {
-    let base =
-        dirs::config_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"));
-    base.join("cellforge").join("templates")
+    cellforge_config::templates_dir()
 }
 
 fn template_dir(name: &str) -> PathBuf {

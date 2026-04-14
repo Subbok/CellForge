@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileText, Cpu, Share2, Clock, Square, Plus, FolderOpen, Anvil, Settings, Shield, LogOut, Zap, X } from 'lucide-react';
 import { api } from '../services/api';
 import type { Notebook } from '../lib/types';
@@ -42,12 +43,12 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function greeting(): string {
+function greetingKey(): string {
   const h = new Date().getHours();
-  if (h < 6) return 'Good night';
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (h < 6) return 'home.goodNight';
+  if (h < 12) return 'home.goodMorning';
+  if (h < 18) return 'home.goodAfternoon';
+  return 'home.goodEvening';
 }
 
 const LANG_COLORS: Record<string, string> = {
@@ -57,6 +58,7 @@ const LANG_COLORS: Record<string, string> = {
 };
 
 export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdmin, onLogout }: Props) {
+  const { t } = useTranslation();
   const [data, setData] = useState<DashboardData | null>(null);
   const [kernels, setKernels] = useState<KernelInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,7 +119,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
           <div className="w-10 h-10 rounded-2xl bg-accent/10 flex items-center justify-center">
             <Anvil size={22} className="text-accent animate-pulse" />
           </div>
-          <span className="text-sm text-text-muted">Loading workspace...</span>
+          <span className="text-sm text-text-muted">{t('home.loadingWorkspace')}</span>
         </div>
       </div>
     );
@@ -160,18 +162,18 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
                   </div>
                   <button onClick={() => { setShowUserMenu(false); onSettings(); }}
                     className="w-full text-left px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover flex items-center gap-2">
-                    <Settings size={14} /> Settings
+                    <Settings size={14} /> {t('common.settings')}
                   </button>
                   {onAdmin && (
                     <button onClick={() => { setShowUserMenu(false); onAdmin(); }}
                       className="w-full text-left px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover flex items-center gap-2">
-                      <Shield size={14} /> Admin Panel
+                      <Shield size={14} /> {t('home.adminPanel')}
                     </button>
                   )}
                   {onLogout && (
                     <button onClick={() => { setShowUserMenu(false); onLogout(); }}
                       className="w-full text-left px-3 py-2 text-sm text-error hover:bg-error/10 flex items-center gap-2">
-                      <LogOut size={14} /> Sign out
+                      <LogOut size={14} /> {t('home.signOut')}
                     </button>
                   )}
                 </div>
@@ -185,9 +187,9 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
         {/* Greeting */}
         <div>
           <h1 className="text-2xl font-bold text-text tracking-tight">
-            {greeting()}, {displayName}
+            {t(greetingKey())}, {displayName}
           </h1>
-          <p className="text-sm text-text-muted mt-1">Here's what's happening in your workspace</p>
+          <p className="text-sm text-text-muted mt-1">{t('home.workspaceSubtitle')}</p>
         </div>
 
         {error && (
@@ -203,7 +205,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
               </div>
             </div>
             <p className="text-2xl font-bold text-text">{stats.recent_notebooks_count}</p>
-            <p className="text-xs text-text-muted mt-0.5">Recent notebooks</p>
+            <p className="text-xs text-text-muted mt-0.5">{t('home.recentNotebooks')}</p>
           </div>
           <div className="group bg-bg-secondary/60 border border-border/50 rounded-2xl p-5 hover:border-success/30 transition-all duration-300 cursor-default">
             <div className="flex items-center justify-between mb-3">
@@ -213,12 +215,12 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
               {kernels.length > 0 && (
                 <span className="flex items-center gap-1.5 text-[11px] text-success font-medium">
                   <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                  live
+                  {t('home.live')}
                 </span>
               )}
             </div>
             <p className="text-2xl font-bold text-text">{kernels.length}</p>
-            <p className="text-xs text-text-muted mt-0.5">Running kernels</p>
+            <p className="text-xs text-text-muted mt-0.5">{t('home.runningKernels')}</p>
           </div>
           <div className="group bg-bg-secondary/60 border border-border/50 rounded-2xl p-5 hover:border-warning/30 transition-all duration-300 cursor-default">
             <div className="flex items-center justify-between mb-3">
@@ -227,7 +229,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
               </div>
             </div>
             <p className="text-2xl font-bold text-text">{stats.shared_files_count}</p>
-            <p className="text-xs text-text-muted mt-0.5">Shared with me</p>
+            <p className="text-xs text-text-muted mt-0.5">{t('home.sharedWithMe')}</p>
           </div>
         </div>
 
@@ -235,7 +237,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
         <div className="flex items-center gap-3">
           <button onClick={onBrowseFiles}
             className="btn btn-md btn-secondary gap-2 rounded-xl hover:border-border transition-all">
-            <FolderOpen size={15} /> Browse files
+            <FolderOpen size={15} /> {t('home.browseFiles')}
           </button>
           <button
             onClick={async () => {
@@ -246,7 +248,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
               } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
             }}
             className="btn btn-md btn-primary gap-2 rounded-xl shadow-lg shadow-accent/15 hover:shadow-accent/25 active:scale-[0.98] transition-all">
-            <Plus size={15} /> New notebook
+            <Plus size={15} /> {t('home.newNotebook')}
           </button>
         </div>
 
@@ -254,9 +256,9 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
         {data && data.recent_notebooks.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Recent notebooks</h2>
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{t('home.recentNotebooks')}</h2>
               <button onClick={onBrowseFiles} className="text-xs text-accent hover:text-accent-hover transition-colors">
-                View all
+                {t('home.viewAll')}
               </button>
             </div>
             <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
@@ -284,7 +286,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
         {/* Shared with me */}
         {data && data.shared_files.length > 0 && (
           <section>
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Shared with me</h2>
+            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">{t('home.sharedWithMe')}</h2>
             <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
               {data.shared_files.map((s, i) => (
                 <div key={`${s.from_user}-${s.file_name}-${i}`}
@@ -296,7 +298,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
                       <Share2 size={15} className="text-warning" />
                     </div>
                     <span className="text-sm text-text flex-1 truncate font-medium">{s.file_name}</span>
-                    <span className="text-[11px] text-text-muted">from @{s.from_user}</span>
+                    <span className="text-[11px] text-text-muted">{t('home.fromUser', { username: s.from_user })}</span>
                   </button>
                   <button
                     onClick={async (e) => {
@@ -305,7 +307,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
                       loadDashboard();
                     }}
                     className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-all"
-                    title="Remove share"
+                    title={t('home.removeShare')}
                   >
                     <X size={13} />
                   </button>
@@ -318,7 +320,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
         {/* Running kernels */}
         {kernels.length > 0 && (
           <section>
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Running kernels</h2>
+            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">{t('home.runningKernels')}</h2>
             <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
               {kernels.map(k => {
                 const langColor = LANG_COLORS[k.language?.toLowerCase()] ?? '#7aa2f7';
@@ -346,7 +348,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
                     </div>
                     <button onClick={() => stopKernel(k.id)}
                       className="opacity-0 group-hover:opacity-100 btn btn-sm btn-ghost text-error hover:bg-error/10 transition-all"
-                      title="Stop kernel">
+                      title={t('home.stopKernel')}>
                       <Square size={13} />
                     </button>
                   </div>
@@ -362,8 +364,8 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
             <div className="w-16 h-16 rounded-2xl bg-accent/8 flex items-center justify-center mx-auto mb-4">
               <Anvil size={32} className="text-accent/40" />
             </div>
-            <p className="text-text-secondary font-medium">Your workspace is empty</p>
-            <p className="text-sm text-text-muted mt-1">Create a notebook to get started</p>
+            <p className="text-text-secondary font-medium">{t('home.workspaceEmpty')}</p>
+            <p className="text-sm text-text-muted mt-1">{t('home.createToStart')}</p>
             <button
               onClick={async () => {
                 try {
@@ -373,7 +375,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
                 } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
               }}
               className="btn btn-md btn-primary gap-2 rounded-xl mt-4 shadow-lg shadow-accent/15">
-              <Plus size={15} /> Create notebook
+              <Plus size={15} /> {t('home.createNotebook')}
             </button>
           </div>
         )}

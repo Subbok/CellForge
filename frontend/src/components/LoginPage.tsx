@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { Anvil } from 'lucide-react';
 
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export function LoginPage({ isFirstUser, onSuccess }: Props) {
+  const { t } = useTranslation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -25,7 +27,7 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
       if (res.ok && res.user) {
         onSuccess(res.user);
       } else {
-        setError(res.error ?? 'Unknown error');
+        setError(res.error ?? t('auth.unknownError'));
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -65,7 +67,7 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
           </div>
           <h1 className="text-3xl font-bold text-text tracking-tight">CellForge</h1>
           <p className="text-sm text-text-muted mt-2">
-            {isFirstUser ? 'Create your admin account to get started' : 'Sign in to your workspace'}
+            {isFirstUser ? t('auth.createAdminAccount') : t('auth.signInToWorkspace')}
           </p>
         </div>
 
@@ -73,7 +75,7 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
         <div className="bg-bg-secondary/80 backdrop-blur-xl border border-border/60 rounded-2xl p-8 shadow-2xl shadow-black/30">
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-medium text-text-muted mb-1.5 block">Username</label>
+              <label className="text-xs font-medium text-text-muted mb-1.5 block">{t('auth.username')}</label>
               <input
                 value={username}
                 onChange={e => setUsername(e.target.value)}
@@ -84,18 +86,18 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
 
             {isFirstUser && (
               <div>
-                <label className="text-xs font-medium text-text-muted mb-1.5 block">Display name</label>
+                <label className="text-xs font-medium text-text-muted mb-1.5 block">{t('auth.displayName')}</label>
                 <input
                   value={displayName}
                   onChange={e => setDisplayName(e.target.value)}
-                  placeholder="Optional"
+                  placeholder={t('auth.optional')}
                   className="field h-11 rounded-xl bg-bg/60 border-border/60 focus:bg-bg/80 focus:border-accent/60 transition-all"
                 />
               </div>
             )}
 
             <div>
-              <label className="text-xs font-medium text-text-muted mb-1.5 block">Password</label>
+              <label className="text-xs font-medium text-text-muted mb-1.5 block">{t('auth.password')}</label>
               <input
                 type="password"
                 value={password}
@@ -122,15 +124,15 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
             {loading ? (
               <span className="inline-flex items-center gap-2">
                 <span className="w-4 h-4 border-2 border-accent-fg/30 border-t-accent-fg rounded-full animate-spin" />
-                Signing in...
+                {t('auth.signingIn')}
               </span>
-            ) : isFirstUser ? 'Create admin account' : 'Sign in'}
+            ) : isFirstUser ? t('auth.createAdmin') : t('auth.signIn')}
           </button>
         </div>
 
         {/* Footer */}
         <p className="text-center text-[11px] text-text-muted/50 mt-6">
-          CellForge — Notebook IDE
+          {t('auth.tagline')}
         </p>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { useKernelStore } from '../stores/kernelStore';
 import { Cpu, Download, Package, RefreshCw, Zap, Terminal } from 'lucide-react';
@@ -31,6 +32,7 @@ function langColor(lang: string): string {
 }
 
 export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
+  const { t } = useTranslation();
   const modal = useModal();
   const [specs, setSpecs] = useState<SpecEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,8 +104,8 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
               <Zap size={20} className="text-accent" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-text">Select a kernel</h2>
-              <p className="text-xs text-text-muted">Choose which environment to run your code in</p>
+              <h2 className="text-lg font-semibold text-text">{t('kernel.selectKernel')}</h2>
+              <p className="text-xs text-text-muted">{t('kernel.chooseEnvironment')}</p>
             </div>
           </div>
         </div>
@@ -115,15 +117,15 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
               <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center mx-auto mb-3">
                 <Cpu size={24} className="text-accent animate-pulse" />
               </div>
-              <p className="text-sm text-text-muted">Scanning for kernels...</p>
+              <p className="text-sm text-text-muted">{t('kernel.scanning')}</p>
             </div>
           )}
 
           {error && (
             <div className="text-center py-12">
-              <p className="text-error text-sm mb-2">Can't reach backend</p>
+              <p className="text-error text-sm mb-2">{t('kernel.cantReachBackend')}</p>
               <p className="text-text-muted text-xs">
-                Start it with <code className="bg-bg-elevated px-1.5 py-0.5 rounded text-text-secondary">./scripts/dev.sh</code>
+                {t('kernel.startDevScript')}
               </p>
             </div>
           )}
@@ -136,7 +138,7 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
 
               {other.length > 0 && recommended.length > 0 && (
                 <div className="text-[11px] text-text-muted uppercase tracking-wider px-4 pt-5 pb-1 font-semibold">
-                  Other kernels
+                  {t('kernel.otherKernels')}
                 </div>
               )}
 
@@ -147,7 +149,7 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
               {needs.length > 0 && (
                 <>
                   <div className="text-[11px] text-text-muted uppercase tracking-wider px-4 pt-5 pb-1 font-semibold">
-                    Needs kernel installation
+                    {t('kernel.needsInstallation')}
                   </div>
                   {needs.map(s => {
                     const lang = s.language ?? 'python';
@@ -189,14 +191,14 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
                                 : 'pip install ipykernel';
                             }
                             copyToClipboard(cmd).then(async () => {
-                              await modal.alert('Copied', `Copied to clipboard:\n\n${cmd}\n\nRun it in your terminal, then refresh.`, 'info');
+                              await modal.alert(t('kernel.copied'), t('kernel.copiedToClipboard', { cmd }), 'info');
                               setInstalling(null);
                             });
                           }}
                           className="btn btn-sm shrink-0 bg-warning/10 text-warning hover:bg-warning/20 rounded-lg font-medium"
                         >
                           <Terminal size={12} />
-                          {installing === s.env_name ? 'Copied!' : 'Install'}
+                          {installing === s.env_name ? t('kernel.copied') : t('kernel.install')}
                         </button>
                       </div>
                     );
@@ -209,13 +211,13 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
                   <div className="w-14 h-14 rounded-2xl bg-accent/8 flex items-center justify-center mx-auto">
                     <Cpu size={28} className="text-accent/30" />
                   </div>
-                  <p className="text-sm font-medium text-text-secondary">No kernels found</p>
+                  <p className="text-sm font-medium text-text-secondary">{t('kernel.noKernelsFound')}</p>
                   <div className="text-xs text-text-muted max-w-xs mx-auto space-y-2">
-                    <p>To run code you need Python with ipykernel:</p>
+                    <p>{t('kernel.needPython')}</p>
                     <code className="block bg-bg-elevated px-3 py-2 rounded-lg text-text-secondary text-[11px] font-mono">
                       pip install ipykernel
                     </code>
-                    <p>The list auto-refreshes every 5 seconds.</p>
+                    <p>{t('kernel.autoRefresh')}</p>
                   </div>
                 </div>
               )}
@@ -231,17 +233,17 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
             className="btn btn-sm btn-secondary gap-1.5 rounded-xl"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            Refresh
+            {t('common.refresh')}
           </button>
           <div className="flex-1" />
           {onSkip && (
             <button onClick={onSkip} className="btn btn-sm btn-ghost rounded-xl">
-              Open without kernel
+              {t('kernel.openWithoutKernel')}
             </button>
           )}
           {onCancel && (
             <button onClick={onCancel} className="btn btn-sm btn-ghost rounded-xl">
-              Cancel
+              {t('common.cancel')}
             </button>
           )}
         </div>
@@ -251,6 +253,7 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
 }
 
 function KernelButton({ s, onClick }: { s: SpecEntry; onClick: () => void }) {
+  const { t } = useTranslation();
   const lang = (s.language ?? 'python').toLowerCase();
   const color = langColor(lang);
   const isConda = s.env_name && (s.env_path?.includes('conda') || s.env_path?.includes('miniforge') || s.env_path?.includes('mambaforge'));
@@ -278,7 +281,7 @@ function KernelButton({ s, onClick }: { s: SpecEntry; onClick: () => void }) {
           {isConda && (
             <span className="inline-flex items-center gap-1 bg-success/10 text-success px-1.5 py-0.5 rounded text-[10px] font-medium">
               <Package size={9} />
-              conda
+              {t('kernel.conda')}
             </span>
           )}
           {/* Path */}

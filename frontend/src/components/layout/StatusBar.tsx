@@ -1,9 +1,11 @@
+import { useTranslation } from 'react-i18next';
 import { useKernelStore } from '../../stores/kernelStore';
 import { useNotebookStore } from '../../stores/notebookStore';
 import { useUIStore } from '../../stores/uiStore';
 import { executeCommand } from '../../plugins/registry';
 
 export function StatusBar() {
+  const { t } = useTranslation();
   const { status, spec } = useKernelStore();
   const meta = useNotebookStore(s => s.metadata);
   const pluginItems = useUIStore(s => s.pluginStatusBarItems);
@@ -17,7 +19,7 @@ export function StatusBar() {
   return (
     <footer className="h-6 flex items-center px-4 border-t border-border/40 bg-bg text-[11px] text-text-muted gap-4 shrink-0">
       <span>{lang}{ver ? ` ${ver}` : ''}</span>
-      <span>{spec ?? 'no kernel'}</span>
+      <span>{spec ?? t('kernel.noKernel')}</span>
       <span>{status}</span>
       {leftItems.map(item => (
         <PluginStatusItem key={item.id} item={item} />
@@ -26,7 +28,7 @@ export function StatusBar() {
       {rightItems.map(item => (
         <PluginStatusItem key={item.id} item={item} />
       ))}
-      <span>UTF-8</span>
+      <span>{t('statusbar.utf8')}</span>
     </footer>
   );
 }

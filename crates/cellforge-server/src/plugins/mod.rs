@@ -77,23 +77,16 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
 
 /// Root directory for system-wide plugins (admin-installed).
 pub fn system_plugin_dir() -> PathBuf {
-    data_dir().join("plugins")
+    cellforge_config::plugins_dir()
 }
 
 /// Root directory for a given user's personal plugins.
 pub fn user_plugin_dir(username: &str) -> PathBuf {
-    data_dir().join("users").join(username).join("plugins")
+    cellforge_config::user_plugins_dir(username)
 }
 
 /// Root directory for the merged kernel pylib (built-ins + enabled plugins),
 /// one per user so plugin resolution stays isolated between accounts.
 pub fn user_kernel_pylib_dir(username: &str) -> PathBuf {
-    data_dir().join("users").join(username).join("kernel-pylib")
-}
-
-/// `~/.config/cellforge/` — same root used by auth, templates, pylib.
-pub fn data_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
-        .join("cellforge")
+    cellforge_config::user_kernel_pylib_dir(username)
 }

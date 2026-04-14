@@ -8,7 +8,7 @@
  */
 
 export default function register(ctx) {
-  console.log("[bliss-demo] registering all contributions...");
+  console.log("[cellforge-demo] registering all contributions...");
 
   // ── 1. MIME renderer: simple SVG bar chart ──
   ctx.registerMimeRenderer(
@@ -49,9 +49,9 @@ export default function register(ctx) {
   // ── 2. Commands ──
 
   // toolbar button + keybinding + status bar click all point here
-  ctx.registerCommand("bliss-demo.hello", () => {
+  ctx.registerCommand("cellforge-demo.hello", () => {
     alert(
-      "Hello from bliss-demo plugin!\n\n" +
+      "Hello from cellforge-demo plugin!\n\n" +
         "This proves:\n" +
         "  • Toolbar button → command dispatch\n" +
         "  • Keybinding (Ctrl+Shift+D) → same command\n" +
@@ -60,11 +60,11 @@ export default function register(ctx) {
   });
 
   // cell action — gets {cellId, source} as argument
-  ctx.registerCommand("bliss-demo.cell-info", (args) => {
+  ctx.registerCommand("cellforge-demo.cell-info", (args) => {
     const { cellId, source } = args || {};
     const lines = (source || "").split("\n").length;
     alert(
-      `Cell info (from bliss-demo plugin):\n\n` +
+      `Cell info (from cellforge-demo plugin):\n\n` +
         `  ID: ${cellId}\n` +
         `  Lines: ${lines}\n` +
         `  Characters: ${(source || "").length}`
@@ -72,7 +72,7 @@ export default function register(ctx) {
   });
 
   // export format — gets {notebook, filePath} as argument
-  ctx.registerCommand("bliss-demo.export-txt", (args) => {
+  ctx.registerCommand("cellforge-demo.export-txt", (args) => {
     const { notebook, filePath } = args || {};
     const cells = notebook?.cells || [];
     let text = `# Exported from CellForge\n# File: ${filePath || "unknown"}\n\n`;
@@ -101,7 +101,7 @@ export default function register(ctx) {
           Demo Plugin Panel
         </h3>
         <p style="color:#a8adba;line-height:1.6;margin:0 0 12px;">
-          This sidebar panel is contributed by the <b>bliss-demo</b> plugin.
+          This sidebar panel is contributed by the <b>cellforge-demo</b> plugin.
           It proves that <code>registerPanelRenderer</code> works end-to-end.
         </p>
         <div style="display:flex;flex-direction:column;gap:6px;">
@@ -131,7 +131,7 @@ export default function register(ctx) {
     `;
   });
 
-  console.log("[bliss-demo] all contributions registered.");
+  console.log("[cellforge-demo] all contributions registered.");
 }
 
 function esc(s) {

@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 /// Built-in Python helper modules embedded in the binary.
 /// Written to `~/.config/cellforge/pylib/` on first kernel launch and
-/// exposed via PYTHONPATH so `import cellforge_ui` / `import bliss_mermaid`
+/// exposed via PYTHONPATH so `import cellforge_ui` / `import cellforge_mermaid`
 /// works regardless of cwd or installed plugins.
 const BUILTIN_PYTHON_MODULES: &[(&str, &str)] = &[
     ("cellforge_ui.py", include_str!("../python/cellforge_ui.py")),
@@ -22,10 +22,7 @@ const BUILTIN_PYTHON_MODULES: &[(&str, &str)] = &[
 pub fn ensure_builtin_pylib_dir() -> PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
-        let base = dirs::config_dir()
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
-            .join("cellforge")
-            .join("pylib");
+        let base = cellforge_config::pylib_dir();
         let _ = std::fs::create_dir_all(&base);
 
         for (filename, content) in BUILTIN_PYTHON_MODULES {

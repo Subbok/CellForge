@@ -12,8 +12,8 @@ export function setupFormatHandler() {
     if (!pending) return;
     const content = msg.payload?.content as Record<string, unknown> | undefined;
     const text = String(content?.text ?? '');
-    if (text.startsWith('__bliss_fmt:')) {
-      pending(text.slice('__bliss_fmt:'.length));
+    if (text.startsWith('__cf_fmt:')) {
+      pending(text.slice('__cf_fmt:'.length));
       pending = null;
     }
   });
@@ -28,23 +28,23 @@ export function formatPythonCode(code: string): Promise<string | null> {
 
     const script = `
 import base64 as __b64
-__bliss_code = __b64.b64decode("${b64}").decode("utf-8")
+__cf_code = __b64.b64decode("${b64}").decode("utf-8")
 try:
     import black
-    __bliss_r = black.format_str(__bliss_code, mode=black.Mode())
-    print("__bliss_fmt:" + __bliss_r, end="")
+    __cf_r = black.format_str(__cf_code, mode=black.Mode())
+    print("__cf_fmt:" + __cf_r, end="")
 except ImportError:
     try:
         import autopep8
-        __bliss_r = autopep8.fix_code(__bliss_code)
-        print("__bliss_fmt:" + __bliss_r, end="")
+        __cf_r = autopep8.fix_code(__cf_code)
+        print("__cf_fmt:" + __cf_r, end="")
     except ImportError:
-        print("__bliss_fmt:" + __bliss_code, end="")
+        print("__cf_fmt:" + __cf_code, end="")
 except Exception as __e:
-    print("__bliss_fmt:" + __bliss_code, end="")
+    print("__cf_fmt:" + __cf_code, end="")
 finally:
-    del __b64, __bliss_code
-    for __n in ['__bliss_r', 'black', 'autopep8', '__e']:
+    del __b64, __cf_code
+    for __n in ['__cf_r', 'black', 'autopep8', '__e']:
         if __n in dir(): exec(f"del {__n}")
 `;
 

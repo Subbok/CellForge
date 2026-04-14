@@ -7,8 +7,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::data_dir;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginSettings {
     /// When false, non-admin users cannot install plugins at all — only
@@ -30,7 +28,7 @@ fn default_allow_user_plugins() -> bool {
 }
 
 fn settings_path() -> PathBuf {
-    data_dir().join("settings.json")
+    cellforge_config::config_dir().join("settings.json")
 }
 
 /// Load plugin settings from disk. Returns defaults if the file doesn't

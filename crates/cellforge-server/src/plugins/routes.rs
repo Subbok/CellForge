@@ -299,7 +299,7 @@ pub(crate) fn install_plugin_zip_to(
     // of plugin.json in the archive, so we never guess.
     //
     //   plugin.json                    → wrapper = ""
-    //   bliss-mermaid/plugin.json      → wrapper = "bliss-mermaid/"
+    //   cellforge-mermaid/plugin.json  → wrapper = "cellforge-mermaid/"
     //
     // This is safer than guessing per-entry, which would misinterpret
     // legitimate subdirectories like `pylib/` as a wrapper.

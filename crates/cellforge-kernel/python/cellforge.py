@@ -30,7 +30,7 @@ One import gives you everything:
         train_step()
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.5"
 
 # Widgets (interactive, stateful) — from separate module
 from cellforge_ui import slider, button, text, dropdown, Widget

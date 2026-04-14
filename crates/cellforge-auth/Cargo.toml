@@ -13,4 +13,4 @@ rusqlite = { version = "0.39", features = ["bundled"] }
 bcrypt = "0.19"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
-dirs = "6"
+cellforge-config = { path = "../cellforge-config" }

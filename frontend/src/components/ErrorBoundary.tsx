@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 
 interface Props {
@@ -44,58 +45,66 @@ export class ErrorBoundary extends Component<Props, State> {
     const { error, info } = this.state;
     if (!error) return this.props.children;
 
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center p-6">
-        <div className="modal-panel max-w-2xl w-full p-8">
-          <div className="flex items-start gap-4 mb-4">
-            <div className="p-2 rounded-lg bg-error/10 text-error shrink-0">
-              <AlertTriangle size={20} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h1 className="text-lg font-semibold text-text">Something broke</h1>
-              <p className="text-sm text-text-muted mt-1">
-                CellForge hit an unexpected error while rendering. Your notebook
-                isn't lost — it's still saved on disk. Try reloading the page;
-                if the same error comes back, copy the details below into a
-                GitHub issue.
-              </p>
-            </div>
-          </div>
+    return <ErrorFallback error={error} info={info} onReload={this.reload} onReset={this.reset} />;
+  }
+}
 
-          <div className="bg-bg-elevated border border-border rounded-lg p-3 mb-4 font-mono text-xs">
-            <div className="text-error font-semibold mb-1">{error.name}: {error.message}</div>
-            {error.stack && (
-              <details className="mt-2">
-                <summary className="cursor-pointer text-text-muted hover:text-text-secondary select-none">
-                  Stack trace
-                </summary>
-                <pre className="mt-2 text-text-muted whitespace-pre-wrap break-all">
-                  {error.stack}
-                </pre>
-              </details>
-            )}
-            {info?.componentStack && (
-              <details className="mt-2">
-                <summary className="cursor-pointer text-text-muted hover:text-text-secondary select-none">
-                  Component tree
-                </summary>
-                <pre className="mt-2 text-text-muted whitespace-pre-wrap break-all">
-                  {info.componentStack}
-                </pre>
-              </details>
-            )}
-          </div>
+function ErrorFallback({ error, info, onReload, onReset }: {
+  error: Error;
+  info: ErrorInfo | null;
+  onReload: () => void;
+  onReset: () => void;
+}) {
+  const { t } = useTranslation();
 
-          <div className="flex gap-2">
-            <button onClick={this.reload} className="btn btn-md btn-primary">
-              <RotateCcw size={14} /> Reload page
-            </button>
-            <button onClick={this.reset} className="btn btn-md btn-ghost">
-              Try to recover
-            </button>
+  return (
+    <div className="min-h-screen bg-bg flex items-center justify-center p-6">
+      <div className="modal-panel max-w-2xl w-full p-8">
+        <div className="flex items-start gap-4 mb-4">
+          <div className="p-2 rounded-lg bg-error/10 text-error shrink-0">
+            <AlertTriangle size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-semibold text-text">{t('error.somethingBroke')}</h1>
+            <p className="text-sm text-text-muted mt-1">
+              {t('error.errorDescription')}
+            </p>
           </div>
         </div>
+
+        <div className="bg-bg-elevated border border-border rounded-lg p-3 mb-4 font-mono text-xs">
+          <div className="text-error font-semibold mb-1">{error.name}: {error.message}</div>
+          {error.stack && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-text-muted hover:text-text-secondary select-none">
+                {t('error.stackTrace')}
+              </summary>
+              <pre className="mt-2 text-text-muted whitespace-pre-wrap break-all">
+                {error.stack}
+              </pre>
+            </details>
+          )}
+          {info?.componentStack && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-text-muted hover:text-text-secondary select-none">
+                {t('error.componentTree')}
+              </summary>
+              <pre className="mt-2 text-text-muted whitespace-pre-wrap break-all">
+                {info.componentStack}
+              </pre>
+            </details>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={onReload} className="btn btn-md btn-primary">
+            <RotateCcw size={14} /> {t('error.reloadPage')}
+          </button>
+          <button onClick={onReset} className="btn btn-md btn-ghost">
+            {t('error.tryRecover')}
+          </button>
+        </div>
       </div>
-    );
-  }
+    </div>
+  );
 }

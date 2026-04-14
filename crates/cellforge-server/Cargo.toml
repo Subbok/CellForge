@@ -10,6 +10,7 @@ cellforge-varexplorer = { path = "../cellforge-varexplorer" }
 cellforge-reactive = { path = "../cellforge-reactive" }
 cellforge-export = { path = "../cellforge-export" }
 cellforge-auth = { path = "../cellforge-auth" }
+cellforge-config = { path = "../cellforge-config" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

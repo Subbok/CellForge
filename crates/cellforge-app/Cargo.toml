@@ -1,0 +1,18 @@
+[package]
+name = "cellforge-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "cellforge-app"
+
+[dependencies]
+cellforge-server = { path = "../cellforge-server", features = ["embed-frontend"] }
+
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+wry = "0.47"
+tao = { version = "0.30", features = ["rwh_06"] }

@@ -33,5 +33,9 @@ users/
 /tmp/
 cellforge_debug.typ
 
+# Python
+__pycache__/
+*.pyc
+
 # Screenshots
 *.png

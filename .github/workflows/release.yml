@@ -29,9 +29,17 @@ jobs:
             os: macos-latest
             artifact: cellforge-macos-arm64
             binary: cellforge-server
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: cellforge-linux-arm64
+            binary: cellforge-server
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact: cellforge-windows-x64
+            binary: cellforge-server.exe
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            artifact: cellforge-windows-arm64
             binary: cellforge-server.exe
 
     steps:
@@ -63,9 +71,27 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Install cross-compilation tools (Linux ARM)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Install desktop dependencies (Linux)
+        if: runner.os == 'Linux' && matrix.target != 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+
       # Build portable binary with embedded frontend
       - name: Build portable binary
         run: cargo build --release --target ${{ matrix.target }} -p cellforge-server --features embed-frontend
+
+      - name: Build desktop app
+        run: cargo build --release --target ${{ matrix.target }} -p cellforge-app
+        continue-on-error: true
 
       # Ad-hoc sign on macOS so Gatekeeper doesn't flag it as damaged
       - name: Sign binary (macOS)
@@ -78,12 +104,19 @@ jobs:
         run: |
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
           chmod +x ${{ matrix.artifact }}
+          if [ -f target/${{ matrix.target }}/release/cellforge-app ]; then
+            cp target/${{ matrix.target }}/release/cellforge-app ${{ matrix.artifact }}-desktop
+            chmod +x ${{ matrix.artifact }}-desktop
+          fi
 
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "${{ matrix.artifact }}.exe"
+          if (Test-Path "target/${{ matrix.target }}/release/cellforge-app.exe") {
+            Copy-Item "target/${{ matrix.target }}/release/cellforge-app.exe" "${{ matrix.artifact }}-desktop.exe"
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
@@ -92,6 +125,8 @@ jobs:
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.artifact }}.exe
+            ${{ matrix.artifact }}-desktop
+            ${{ matrix.artifact }}-desktop.exe
 
   release:
     name: Create GitHub Release

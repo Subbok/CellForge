@@ -47,7 +47,7 @@ export default function register(ctx) {
     "application/vnd.cellforge.mermaid",
     async (container, data) => {
       const mermaid = await ensureMermaid();
-      const id = `bliss-mermaid-${++counter}`;
+      const id = `cellforge-mermaid-${++counter}`;
 
       try {
         const { svg } = await mermaid.render(id, data.source);

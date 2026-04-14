@@ -7,61 +7,61 @@
 /// We wrap everything in a `let ... end` block to avoid polluting the namespace.
 pub const INSPECT_VARIABLES: &str = r#"
 let
-    _bliss_result = Dict{String, Any}[]
-    for _bliss_n in names(Main; all=false, imported=false)
-        _bliss_n in (:ans, :include, :eval, :Core, :Base, :Main, :InteractiveUtils) && continue
-        startswith(String(_bliss_n), "_") && continue
-        _bliss_v = try; getfield(Main, _bliss_n); catch; continue; end
-        _bliss_t = typeof(_bliss_v)
+    _cf_result = Dict{String, Any}[]
+    for _cf_n in names(Main; all=false, imported=false)
+        _cf_n in (:ans, :include, :eval, :Core, :Base, :Main, :InteractiveUtils) && continue
+        startswith(String(_cf_n), "_") && continue
+        _cf_v = try; getfield(Main, _cf_n); catch; continue; end
+        _cf_t = typeof(_cf_v)
         # skip modules, functions, and types
-        _bliss_t <: Module && continue
-        _bliss_t <: Function && continue
-        _bliss_t <: Type && continue
+        _cf_t <: Module && continue
+        _cf_t <: Function && continue
+        _cf_t <: Type && continue
 
-        _bliss_info = Dict{String, Any}(
-            "name" => String(_bliss_n),
-            "type" => string(_bliss_t),
-            "module" => string(parentmodule(_bliss_t)),
+        _cf_info = Dict{String, Any}(
+            "name" => String(_cf_n),
+            "type" => string(_cf_t),
+            "module" => string(parentmodule(_cf_t)),
         )
 
         try
-            if hasmethod(size, Tuple{typeof(_bliss_v)})
-                _bliss_s = size(_bliss_v)
-                _bliss_info["shape"] = join(string.(_bliss_s), ", ")
-            elseif applicable(length, _bliss_v)
-                _bliss_info["shape"] = string(length(_bliss_v))
+            if hasmethod(size, Tuple{typeof(_cf_v)})
+                _cf_s = size(_cf_v)
+                _cf_info["shape"] = join(string.(_cf_s), ", ")
+            elseif applicable(length, _cf_v)
+                _cf_info["shape"] = string(length(_cf_v))
             end
         catch; end
 
         try
-            _bliss_info["size"] = Base.summarysize(_bliss_v)
+            _cf_info["size"] = Base.summarysize(_cf_v)
         catch; end
 
         try
-            _bliss_r = repr(_bliss_v)
-            if length(_bliss_r) > 500
-                _bliss_r = _bliss_r[1:min(500, lastindex(_bliss_r))] * "..."
+            _cf_r = repr(_cf_v)
+            if length(_cf_r) > 500
+                _cf_r = _cf_r[1:min(500, lastindex(_cf_r))] * "..."
             end
-            _bliss_info["repr"] = _bliss_r
+            _cf_info["repr"] = _cf_r
         catch
-            _bliss_info["repr"] = "<error>"
+            _cf_info["repr"] = "<error>"
         end
 
-        push!(_bliss_result, _bliss_info)
+        push!(_cf_result, _cf_info)
     end
 
     # Build a dict keyed by variable name (matching Python schema)
-    _bliss_out = Dict{String, Any}()
-    for _bliss_item in _bliss_result
-        _bliss_out[_bliss_item["name"]] = _bliss_item
+    _cf_out = Dict{String, Any}()
+    for _cf_item in _cf_result
+        _cf_out[_cf_item["name"]] = _cf_item
     end
 
     if @isdefined(JSON)
-        print(JSON.json(_bliss_out))
+        print(JSON.json(_cf_out))
     else
         try
             using JSON
-            print(JSON.json(_bliss_out))
+            print(JSON.json(_cf_out))
         catch
             print("{}")
         end
@@ -78,25 +78,25 @@ let
     if !isdefined(Main, :{var_name})
         print("null")
     else
-        _bliss_df = getfield(Main, :{var_name})
-        if applicable(names, _bliss_df) && applicable(size, _bliss_df) && ndims(_bliss_df) == 2
+        _cf_df = getfield(Main, :{var_name})
+        if applicable(names, _cf_df) && applicable(size, _cf_df) && ndims(_cf_df) == 2
             try
-                _bliss_cols = string.(names(_bliss_df))
-                _bliss_dtypes = Dict(string(c) => string(eltype(getproperty(_bliss_df, Symbol(c)))) for c in _bliss_cols)
-                _bliss_shape = collect(size(_bliss_df))
-                _bliss_nrows = min(50, size(_bliss_df, 1))
-                _bliss_head = [Dict(string(c) => let v = _bliss_df[i, Symbol(c)]; ismissing(v) ? "NaN" : v end for c in _bliss_cols) for i in 1:_bliss_nrows]
-                _bliss_result = Dict(
-                    "columns" => _bliss_cols,
-                    "dtypes" => _bliss_dtypes,
-                    "shape" => _bliss_shape,
-                    "head" => _bliss_head,
+                _cf_cols = string.(names(_cf_df))
+                _cf_dtypes = Dict(string(c) => string(eltype(getproperty(_cf_df, Symbol(c)))) for c in _cf_cols)
+                _cf_shape = collect(size(_cf_df))
+                _cf_nrows = min(50, size(_cf_df, 1))
+                _cf_head = [Dict(string(c) => let v = _cf_df[i, Symbol(c)]; ismissing(v) ? "NaN" : v end for c in _cf_cols) for i in 1:_cf_nrows]
+                _cf_result = Dict(
+                    "columns" => _cf_cols,
+                    "dtypes" => _cf_dtypes,
+                    "shape" => _cf_shape,
+                    "head" => _cf_head,
                 )
                 if @isdefined(JSON)
-                    print(JSON.json(_bliss_result))
+                    print(JSON.json(_cf_result))
                 else
                     using JSON
-                    print(JSON.json(_bliss_result))
+                    print(JSON.json(_cf_result))
                 end
             catch
                 print("null")

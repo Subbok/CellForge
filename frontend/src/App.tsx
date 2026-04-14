@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AppLayout } from './components/layout/AppLayout';
 import { Dashboard } from './components/Dashboard';
 import { KernelPicker } from './components/KernelPicker';
@@ -67,6 +68,7 @@ function pickAccentFg(hex: string): string {
 }
 
 function App() {
+  const { t } = useTranslation();
   const [stage, setStageRaw] = useState<Stage>('loading');
   const [user, setUser] = useState<{ username: string; is_admin: boolean } | null>(null);
   const [isFirstUser, setIsFirstUser] = useState(false);
@@ -187,9 +189,9 @@ function App() {
       if (isDirty || isBusy) {
         e.preventDefault();
         // Modern browsers require returning a string or setting returnValue
-        const msg = isBusy 
-          ? 'Kernel is still executing code. Leaving will keep it running on the server. Continue?' 
-          : 'You have unsaved changes.';
+        const msg = isBusy
+          ? t('app.kernelRunningWarning')
+          : t('app.unsavedChanges');
         e.returnValue = msg;
         return msg;
       }

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useVariableStore, type DataFramePreview } from '../../stores/variableStore';
 import { useKernelStore } from '../../stores/kernelStore';
 import { ws } from '../../services/websocket';
@@ -44,6 +45,7 @@ const PREVIEWABLE = new Set([
 ]);
 
 export function VariableExplorer() {
+  const { t } = useTranslation();
   const vars = useVariableStore(s => s.vars);
   const selected = useVariableStore(s => s.selected);
   const select = useVariableStore(s => s.select);
@@ -58,7 +60,7 @@ export function VariableExplorer() {
   if (!list.length) {
     return (
       <p className="text-xs text-text-muted py-4 text-center">
-        No variables yet. Run a cell to see them here.
+        {t('variables.noVariables')}
       </p>
     );
   }
@@ -104,9 +106,9 @@ export function VariableExplorer() {
               {/* extra info line: shape, dtype, size */}
               {(v.shape || v.dtype || v.size != null) && (
                 <div className="text-text-muted mt-0.5 flex gap-2 flex-wrap">
-                  {v.shape && <span>shape: {v.shape}</span>}
-                  {v.dtype && <span>dtype: {v.dtype}</span>}
-                  {v.size != null && <span>len: {v.size}</span>}
+                  {v.shape && <span>{t('variables.shape')} {v.shape}</span>}
+                  {v.dtype && <span>{t('variables.dtype')} {v.dtype}</span>}
+                  {v.size != null && <span>{t('variables.len')} {v.size}</span>}
                 </div>
               )}
             </button>
@@ -115,7 +117,7 @@ export function VariableExplorer() {
             {isSelected && (
               <div className="px-2 pb-1">
                 {v.module && v.module !== 'builtins' && (
-                  <div className="text-[10px] text-text-muted mb-1">from {v.module}</div>
+                  <div className="text-[10px] text-text-muted mb-1">{t('variables.fromModule', { module: v.module })}</div>
                 )}
 
                 <pre className="p-1.5 bg-bg rounded font-mono text-text-secondary break-all whitespace-pre-wrap text-[11px]">
@@ -129,7 +131,7 @@ export function VariableExplorer() {
                     className="mt-1.5 flex items-center gap-1.5 text-[11px] text-accent hover:text-accent-hover transition-colors"
                   >
                     <Table size={12} />
-                    {previewLoading ? 'Loading...' : 'Preview table'}
+                    {previewLoading ? t('common.loading') : t('variables.previewTable')}
                   </button>
                 )}
 
@@ -146,12 +148,13 @@ export function VariableExplorer() {
 }
 
 function DFPreview({ data }: { data: DataFramePreview }) {
+  const { t } = useTranslation();
   if (!data.columns || !data.head) return null;
 
   return (
     <div className="mt-2 overflow-x-auto border border-border rounded">
       <div className="text-[10px] text-text-muted px-2 py-1 border-b border-border">
-        {data.shape[0]} rows x {data.shape[1]} cols
+        {t('variables.rowsCols', { rows: data.shape[0], cols: data.shape[1] })}
       </div>
       <table className="w-full text-[10px] font-mono">
         <thead>

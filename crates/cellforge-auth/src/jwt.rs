@@ -17,9 +17,7 @@ static SECRET: OnceLock<Vec<u8>> = OnceLock::new();
 fn secret() -> &'static [u8] {
     SECRET.get_or_init(|| {
         // try to load from config, or generate random
-        let dir = dirs::config_dir()
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
-            .join("cellforge");
+        let dir = cellforge_config::config_dir();
         let key_path = dir.join("jwt_secret");
 
         if let Ok(key) = std::fs::read(&key_path)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type FileEntry } from '../services/api';
 import type { Notebook } from '../lib/types';
 import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Plus, ArrowLeft, Settings, Upload, Pencil, Trash2, Share2, Archive, FolderPlus, Download } from 'lucide-react';
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
+  const { t } = useTranslation();
   const [cwd, setCwd] = useState(''); // relative path within notebook_dir
   const [_rootDir, setRootDir] = useState('');
   const [files, setFiles] = useState<FileEntry[]>([]);
@@ -119,13 +121,13 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
             {onBack && (
               <>
                 <button onClick={onBack} className="btn btn-sm btn-ghost gap-1.5">
-                  <ArrowLeft size={14} /> Home
+                  <ArrowLeft size={14} /> {t('dashboard.home')}
                 </button>
                 <div className="w-px h-5 bg-border/50" />
               </>
             )}
             <FolderOpen size={16} className="text-accent" />
-            <span className="font-semibold text-text text-sm tracking-tight">Files</span>
+            <span className="font-semibold text-text text-sm tracking-tight">{t('dashboard.files')}</span>
           </div>
           {onSettings && (
             <button onClick={onSettings} className="btn btn-sm btn-ghost">
@@ -147,7 +149,7 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
             )}
             <button onClick={() => setCwd('')}
               className="px-2.5 py-1 rounded-lg hover:bg-bg-hover text-text-secondary font-medium text-xs">
-              Home
+              {t('dashboard.home')}
             </button>
             {crumbs.map((part, i) => {
               const path = crumbs.slice(0, i + 1).join('/');
@@ -185,13 +187,13 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
                 onClick={() => { setShowUploadMenu(v => !v); setShowNewMenu(false); }}
                 className="btn btn-md btn-secondary rounded-xl"
               >
-                <Upload size={14} /> Upload <ChevronDown size={11} />
+                <Upload size={14} /> {t('common.upload')} <ChevronDown size={11} />
               </button>
               {showUploadMenu && <div className="absolute right-0 mt-1 bg-bg-secondary/95 backdrop-blur-xl border border-border/60 rounded-xl shadow-2xl shadow-black/40 z-20 py-1.5 w-40">
                 <button onClick={() => { uploadRef.current?.click(); setShowUploadMenu(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><FileText size={14} /> Files</button>
+                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><FileText size={14} /> {t('dashboard.files')}</button>
                 <button onClick={() => { folderRef.current?.click(); setShowUploadMenu(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><Folder size={14} /> Folder</button>
+                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><Folder size={14} /> {t('dashboard.folder')}</button>
               </div>}
             </div>
             <div className="relative">
@@ -199,13 +201,13 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
                 onClick={() => { setShowNewMenu(v => !v); setShowUploadMenu(false); }}
                 className="btn btn-md btn-primary rounded-xl shadow-lg shadow-accent/15"
               >
-                <Plus size={14} /> New <ChevronDown size={11} />
+                <Plus size={14} /> {t('dashboard.new')} <ChevronDown size={11} />
               </button>
               {showNewMenu && <div className="absolute right-0 mt-1 bg-bg-secondary/95 backdrop-blur-xl border border-border/60 rounded-xl shadow-2xl shadow-black/40 z-20 py-1.5 w-40">
                 <button onClick={() => { setCreateModal('notebook'); setCreateName('Untitled.ipynb'); setShowNewMenu(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><FileText size={14} /> Notebook</button>
+                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><FileText size={14} /> {t('dashboard.notebook')}</button>
                 <button onClick={() => { setCreateModal('folder'); setCreateName(''); setShowNewMenu(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><FolderPlus size={14} /> Folder</button>
+                  className="w-full text-left px-3 py-2 text-sm text-text hover:bg-bg-hover flex items-center gap-2"><FolderPlus size={14} /> {t('dashboard.folder')}</button>
               </div>}
             </div>
           </div>
@@ -216,7 +218,7 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
           <div className="fixed inset-0 bg-accent/10 border-2 border-dashed border-accent rounded-3xl z-40 flex items-center justify-center pointer-events-none">
             <div className="text-center">
               <Upload size={32} className="text-accent mx-auto mb-2" />
-              <span className="text-accent text-lg font-medium">Drop files here</span>
+              <span className="text-accent text-lg font-medium">{t('dashboard.dropFilesHere')}</span>
             </div>
           </div>
         )}
@@ -224,11 +226,11 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
         {/* multi-select toolbar */}
         {selected.size > 0 && (
           <div className="mb-4 flex items-center gap-3 px-4 py-2.5 bg-accent/5 border border-accent/20 rounded-xl">
-            <span className="text-xs text-accent font-medium">{selected.size} selected</span>
+            <span className="text-xs text-accent font-medium">{t('dashboard.selectedCount', { count: selected.size })}</span>
             <button onClick={downloadSelected}
-              className="text-xs px-2.5 py-1 text-accent hover:bg-accent/10 rounded-lg font-medium">Download ZIP</button>
+              className="text-xs px-2.5 py-1 text-accent hover:bg-accent/10 rounded-lg font-medium">{t('dashboard.downloadZip')}</button>
             <button onClick={() => setSelected(new Set())}
-              className="text-xs px-2.5 py-1 text-text-muted hover:bg-bg-hover rounded-lg">Clear</button>
+              className="text-xs px-2.5 py-1 text-text-muted hover:bg-bg-hover rounded-lg">{t('common.clear')}</button>
           </div>
         )}
 
@@ -238,12 +240,12 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
 
         {/* file list */}
         {loading ? (
-          <div className="text-center py-20 text-text-muted text-sm">Loading...</div>
+          <div className="text-center py-20 text-text-muted text-sm">{t('common.loading')}</div>
         ) : files.length === 0 ? (
           <div className="text-center py-20">
             <FolderOpen size={32} className="text-text-muted/30 mx-auto mb-3" />
-            <p className="text-text-secondary font-medium">Empty directory</p>
-            <p className="text-sm text-text-muted mt-1">Create a new notebook to get started</p>
+            <p className="text-text-secondary font-medium">{t('dashboard.emptyDirectory')}</p>
+            <p className="text-sm text-text-muted mt-1">{t('dashboard.createNotebookToStart')}</p>
           </div>
         ) : (
           <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
@@ -341,10 +343,10 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
                 }}
                 className="btn btn-md btn-primary flex-1"
               >
-                Create
+                {t('common.create')}
               </button>
               <button onClick={() => setCreateModal(null)} className="btn btn-md btn-ghost">
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           </div>
@@ -381,7 +383,7 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
               </div>
             )}
             <button onClick={() => setShareTarget(null)} className="btn btn-md btn-ghost w-full">
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -405,10 +407,10 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
                 }}
                 className="btn btn-md btn-danger flex-1"
               >
-                Delete
+                {t('common.delete')}
               </button>
               <button onClick={() => setDeleteTarget(null)} className="btn btn-md btn-ghost">
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           </div>

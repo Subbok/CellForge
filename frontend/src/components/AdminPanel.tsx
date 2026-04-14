@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { ArrowLeft, RefreshCw, Square, Trash2, Users, Cpu, HardDrive, Shield, Plus, Settings2, Layers } from 'lucide-react';
 
@@ -12,6 +13,7 @@ interface AdminKernel { id: string; username: string; kernel_spec: string; langu
 const LANG_COLORS: Record<string, string> = { python: '#7aa2f7', r: '#2d7dca', julia: '#9558b2' };
 
 export function AdminPanel({ onBack }: Props) {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [groups, setGroups] = useState<AdminGroup[]>([]);
@@ -91,7 +93,7 @@ export function AdminPanel({ onBack }: Props) {
   }
 
   if (loading) {
-    return <div className="min-h-screen bg-bg flex items-center justify-center text-text-muted text-sm">Loading admin data...</div>;
+    return <div className="min-h-screen bg-bg flex items-center justify-center text-text-muted text-sm">{t('admin.loadingAdmin')}</div>;
   }
 
   return (
@@ -105,16 +107,16 @@ export function AdminPanel({ onBack }: Props) {
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="btn btn-sm btn-ghost gap-1.5">
-              <ArrowLeft size={14} /> Back
+              <ArrowLeft size={14} /> {t('common.back')}
             </button>
             <div className="w-px h-5 bg-border/50" />
             <div className="flex items-center gap-2">
               <Shield size={16} className="text-error" />
-              <span className="font-semibold text-text text-sm">Admin Panel</span>
+              <span className="font-semibold text-text text-sm">{t('admin.title')}</span>
             </div>
           </div>
           <button onClick={refresh} className="btn btn-sm btn-secondary gap-1.5 rounded-xl">
-            <RefreshCw size={13} /> Refresh
+            <RefreshCw size={13} /> {t('common.refresh')}
           </button>
         </div>
       </header>
@@ -132,21 +134,21 @@ export function AdminPanel({ onBack }: Props) {
                 <Users size={18} className="text-accent" />
               </div>
               <p className="text-2xl font-bold text-text">{stats.user_count}</p>
-              <p className="text-xs text-text-muted mt-0.5">Total users</p>
+              <p className="text-xs text-text-muted mt-0.5">{t('admin.totalUsers')}</p>
             </div>
             <div className="bg-bg-secondary/60 border border-border/50 rounded-2xl p-5">
               <div className="w-9 h-9 rounded-xl bg-success/10 flex items-center justify-center mb-3">
                 <Cpu size={18} className="text-success" />
               </div>
               <p className="text-2xl font-bold text-text">{stats.total_kernels}</p>
-              <p className="text-xs text-text-muted mt-0.5">Running kernels</p>
+              <p className="text-xs text-text-muted mt-0.5">{t('admin.runningKernels')}</p>
             </div>
             <div className="bg-bg-secondary/60 border border-border/50 rounded-2xl p-5">
               <div className="w-9 h-9 rounded-xl bg-warning/10 flex items-center justify-center mb-3">
                 <HardDrive size={18} className="text-warning" />
               </div>
-              <p className="text-2xl font-bold text-text">{stats.total_memory_mb} <span className="text-sm font-normal text-text-muted">MB</span></p>
-              <p className="text-xs text-text-muted mt-0.5">Total memory</p>
+              <p className="text-2xl font-bold text-text">{stats.total_memory_mb} <span className="text-sm font-normal text-text-muted">{t('admin.mb')}</span></p>
+              <p className="text-xs text-text-muted mt-0.5">{t('admin.totalMemory')}</p>
             </div>
           </div>
         )}
@@ -155,17 +157,17 @@ export function AdminPanel({ onBack }: Props) {
         <section>
           <div className="flex items-center gap-2 mb-4">
             <Users size={16} className="text-text-muted" />
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Users</h2>
+            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{t('admin.usersSection')}</h2>
           </div>
           <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[11px] text-text-muted uppercase tracking-wider">
-                  <th className="text-left px-5 py-3 font-medium">User</th>
-                  <th className="text-left px-5 py-3 font-medium">Role</th>
-                  <th className="text-left px-5 py-3 font-medium">Kernels</th>
-                  <th className="text-left px-5 py-3 font-medium">Joined</th>
-                  <th className="text-right px-5 py-3 font-medium">Actions</th>
+                  <th className="text-left px-5 py-3 font-medium">{t('settings.user')}</th>
+                  <th className="text-left px-5 py-3 font-medium">{t('admin.role')}</th>
+                  <th className="text-left px-5 py-3 font-medium">{t('admin.kernels')}</th>
+                  <th className="text-left px-5 py-3 font-medium">{t('admin.joined')}</th>
+                  <th className="text-right px-5 py-3 font-medium">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/30">
@@ -196,7 +198,7 @@ export function AdminPanel({ onBack }: Props) {
                     <td className="px-5 py-3 text-right">
                       <button onClick={() => { setEditUser(u.username); setEditMaxKernels(''); setEditMaxMemory(''); setEditGroup(''); }}
                         className="btn btn-sm btn-ghost gap-1 text-xs">
-                        <Settings2 size={12} /> Limits
+                        <Settings2 size={12} /> {t('admin.limits')}
                       </button>
                     </td>
                   </tr>
@@ -211,10 +213,10 @@ export function AdminPanel({ onBack }: Props) {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Layers size={16} className="text-text-muted" />
-              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Groups</h2>
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{t('admin.groups')}</h2>
             </div>
             <button onClick={() => setShowNewGroup(v => !v)} className="btn btn-sm btn-secondary gap-1.5 rounded-xl">
-              <Plus size={13} /> New group
+              <Plus size={13} /> {t('admin.newGroup')}
             </button>
           </div>
 
@@ -222,25 +224,25 @@ export function AdminPanel({ onBack }: Props) {
             <div className="bg-bg-secondary/60 border border-border/50 rounded-2xl p-5 mb-4">
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>
-                  <label className="text-[11px] font-medium text-text-muted mb-1 block">Name</label>
+                  <label className="text-[11px] font-medium text-text-muted mb-1 block">{t('common.name')}</label>
                   <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="field rounded-xl" placeholder="e.g. students" />
                 </div>
                 <div>
-                  <label className="text-[11px] font-medium text-text-muted mb-1 block">Description</label>
+                  <label className="text-[11px] font-medium text-text-muted mb-1 block">{t('common.description')}</label>
                   <input value={newGroupDesc} onChange={e => setNewGroupDesc(e.target.value)} className="field rounded-xl" placeholder="Optional" />
                 </div>
                 <div>
-                  <label className="text-[11px] font-medium text-text-muted mb-1 block">Max kernels / user</label>
+                  <label className="text-[11px] font-medium text-text-muted mb-1 block">{t('admin.maxKernelsPerUser')}</label>
                   <input value={newGroupMaxKernels} onChange={e => setNewGroupMaxKernels(e.target.value)} type="number" className="field rounded-xl" />
                 </div>
                 <div>
-                  <label className="text-[11px] font-medium text-text-muted mb-1 block">Max memory MB / user</label>
+                  <label className="text-[11px] font-medium text-text-muted mb-1 block">{t('admin.maxMemoryPerUser')}</label>
                   <input value={newGroupMaxMemory} onChange={e => setNewGroupMaxMemory(e.target.value)} type="number" className="field rounded-xl" />
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={createGroup} className="btn btn-sm btn-primary rounded-xl">Create</button>
-                <button onClick={() => setShowNewGroup(false)} className="btn btn-sm btn-ghost">Cancel</button>
+                <button onClick={createGroup} className="btn btn-sm btn-primary rounded-xl">{t('common.create')}</button>
+                <button onClick={() => setShowNewGroup(false)} className="btn btn-sm btn-ghost">{t('common.cancel')}</button>
               </div>
             </div>
           )}
@@ -266,7 +268,7 @@ export function AdminPanel({ onBack }: Props) {
             </div>
           ) : (
             <div className="text-center py-8 text-sm text-text-muted bg-bg-secondary/20 rounded-2xl border border-border/30">
-              No groups yet. Create one to set resource limits for teams.
+              {t('admin.noGroups')}
             </div>
           )}
         </section>
@@ -276,11 +278,11 @@ export function AdminPanel({ onBack }: Props) {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Cpu size={16} className="text-text-muted" />
-              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Running Kernels</h2>
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{t('admin.runningKernelsSection')}</h2>
             </div>
             {kernels.length > 0 && (
               <button onClick={stopAllIdle} className="btn btn-sm btn-danger gap-1.5 rounded-xl">
-                <Square size={12} /> Stop all idle
+                <Square size={12} /> {t('admin.stopAllIdle')}
               </button>
             )}
           </div>
@@ -351,8 +353,8 @@ export function AdminPanel({ onBack }: Props) {
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={saveUserLimits} className="btn btn-md btn-primary flex-1 rounded-xl">Save</button>
-              <button onClick={() => setEditUser(null)} className="btn btn-md btn-ghost rounded-xl">Cancel</button>
+              <button onClick={saveUserLimits} className="btn btn-md btn-primary flex-1 rounded-xl">{t('common.save')}</button>
+              <button onClick={() => setEditUser(null)} className="btn btn-md btn-ghost rounded-xl">{t('common.cancel')}</button>
             </div>
           </div>
         </div>

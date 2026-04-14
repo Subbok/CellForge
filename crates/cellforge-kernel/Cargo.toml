@@ -18,5 +18,6 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 futures = "0.3"
+cellforge-config = { path = "../cellforge-config" }
 dirs = "6"
 libc = "0.2"

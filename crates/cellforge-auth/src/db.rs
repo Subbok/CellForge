@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
 use serde::Serialize;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub struct UserDb {
@@ -20,13 +19,66 @@ pub struct User {
 
 impl UserDb {
     pub fn open() -> Result<Self> {
-        let dir = data_dir();
+        let dir = cellforge_config::config_dir();
         std::fs::create_dir_all(&dir)?;
         let db_path = dir.join("users.db");
 
         let conn = Connection::open(&db_path)
             .with_context(|| format!("opening db at {}", db_path.display()))?;
 
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+
+        Self::run_migrations(&conn)?;
+
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    fn run_migrations(conn: &Connection) -> Result<()> {
+        let version: i32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+
+        if version == 0 {
+            // Check if this is an existing v0.3 database (has tables but user_version=0)
+            let has_users: bool = conn
+                .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'")?
+                .exists([])?;
+
+            if has_users {
+                // Existing database — run idempotent ALTER TABLEs for columns
+                // that may have been added by earlier non-migration code
+                let alters = [
+                    "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE users ADD COLUMN max_kernels INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE users ADD COLUMN max_memory_mb INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE users ADD COLUMN group_name TEXT NOT NULL DEFAULT ''",
+                    "ALTER TABLE users ADD COLUMN last_active DATETIME DEFAULT NULL",
+                    "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE file_history ADD COLUMN changed_cells TEXT NOT NULL DEFAULT '[]'",
+                ];
+                for sql in alters {
+                    let _ = conn.execute_batch(sql);
+                }
+                // Ensure all tables exist (groups, kernel_sessions, file_history, shared_files
+                // may have been created by older code already, but IF NOT EXISTS is safe)
+                Self::create_all_tables(conn)?;
+                conn.execute_batch("PRAGMA user_version = 1;")?;
+            } else {
+                // Fresh database — create everything from scratch
+                Self::create_all_tables(conn)?;
+                conn.execute_batch("PRAGMA user_version = 1;")?;
+            }
+        }
+
+        // Future migrations:
+        // if version < 2 {
+        //     conn.execute_batch("ALTER TABLE ... ; PRAGMA user_version = 2;")?;
+        // }
+
+        Ok(())
+    }
+
+    fn create_all_tables(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS users (
@@ -36,33 +88,14 @@ impl UserDb {
                 display_name TEXT NOT NULL DEFAULT '',
                 workspace_dir TEXT NOT NULL,
                 is_admin INTEGER NOT NULL DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                max_kernels INTEGER NOT NULL DEFAULT 0,
+                max_memory_mb INTEGER NOT NULL DEFAULT 0,
+                group_name TEXT NOT NULL DEFAULT '',
+                last_active DATETIME DEFAULT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0
             );
-        ",
-        )?;
 
-        // migrations
-        let _ =
-            conn.execute_batch("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;");
-        let _ = conn.execute_batch(
-            "ALTER TABLE file_history ADD COLUMN changed_cells TEXT NOT NULL DEFAULT '[]';",
-        );
-
-        // hub-mode migrations: user resource limits & group membership
-        let _ = conn
-            .execute_batch("ALTER TABLE users ADD COLUMN max_kernels INTEGER NOT NULL DEFAULT 0;");
-        let _ = conn.execute_batch(
-            "ALTER TABLE users ADD COLUMN max_memory_mb INTEGER NOT NULL DEFAULT 0;",
-        );
-        let _ =
-            conn.execute_batch("ALTER TABLE users ADD COLUMN group_name TEXT NOT NULL DEFAULT '';");
-        let _ =
-            conn.execute_batch("ALTER TABLE users ADD COLUMN last_active DATETIME DEFAULT NULL;");
-        let _ = conn
-            .execute_batch("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0;");
-
-        conn.execute_batch(
-            "
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE NOT NULL,
@@ -71,11 +104,7 @@ impl UserDb {
                 max_memory_mb_per_user INTEGER NOT NULL DEFAULT 1024,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
-            ",
-        )?;
 
-        conn.execute_batch(
-            "
             CREATE TABLE IF NOT EXISTS kernel_sessions (
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
@@ -88,11 +117,7 @@ impl UserDb {
                 status TEXT NOT NULL DEFAULT 'running'
             );
             CREATE INDEX IF NOT EXISTS idx_ks_username ON kernel_sessions(username);
-            ",
-        )?;
 
-        conn.execute_batch(
-            "
             CREATE TABLE IF NOT EXISTS file_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 file_path TEXT NOT NULL,
@@ -103,11 +128,7 @@ impl UserDb {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_history_path ON file_history(file_path);
-        ",
-        )?;
 
-        conn.execute_batch(
-            "
             CREATE TABLE IF NOT EXISTS shared_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 from_user TEXT NOT NULL,
@@ -116,12 +137,9 @@ impl UserDb {
                 file_path TEXT NOT NULL,
                 shared_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
-        ",
+            ",
         )?;
-
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        Ok(())
     }
 
     /// Register a new user. First user is automatically admin.
@@ -136,7 +154,7 @@ impl UserDb {
 
         let is_admin = !self.has_users(); // first user = admin
         let hash = bcrypt::hash(password, 10).context("hashing password")?;
-        let workspace = workspace_dir(&username);
+        let workspace = cellforge_config::user_workspace_dir(&username);
         std::fs::create_dir_all(&workspace)?;
 
         let conn = self.conn.lock().unwrap();
@@ -754,12 +772,3 @@ pub struct RecentNotebook {
     pub last_opened: String,
 }
 
-fn data_dir() -> PathBuf {
-    let base =
-        dirs::config_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"));
-    base.join("cellforge")
-}
-
-fn workspace_dir(username: &str) -> PathBuf {
-    data_dir().join("users").join(username).join("notebooks")
-}

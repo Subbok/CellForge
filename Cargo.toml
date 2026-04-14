@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/cellforge-config",
     "crates/cellforge-server",
     "crates/cellforge-notebook",
     "crates/cellforge-kernel",
@@ -8,10 +9,11 @@ members = [
     "crates/cellforge-varexplorer",
     "crates/cellforge-export",
     "crates/cellforge-auth",
+    "crates/cellforge-app",
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.5"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 

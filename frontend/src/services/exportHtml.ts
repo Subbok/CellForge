@@ -156,14 +156,14 @@ export function exportNotebookHtml() {
     --font-sans: system-ui, -apple-system, sans-serif;
   }
   /* mermaid diagrams are rendered with dark theme inline — invert for light bg */
-  [id^="bliss-mermaid"] .node rect,
-  [id^="bliss-mermaid"] .node polygon,
-  [id^="bliss-mermaid"] .cluster rect { fill: #f0f4ff !important; stroke: #6c8cff !important; }
-  [id^="bliss-mermaid"] .nodeLabel,
-  [id^="bliss-mermaid"] text { fill: #1a1a2e !important; }
-  [id^="bliss-mermaid"] .edgePath path { stroke: #4a6cf7 !important; }
-  [id^="bliss-mermaid"] .arrowheadPath { fill: #4a6cf7 !important; }
-  [id^="bliss-mermaid"] line { stroke: #cbd5e0 !important; }
+  [id^="cf-mermaid"] .node rect,
+  [id^="cf-mermaid"] .node polygon,
+  [id^="cf-mermaid"] .cluster rect { fill: #f0f4ff !important; stroke: #6c8cff !important; }
+  [id^="cf-mermaid"] .nodeLabel,
+  [id^="cf-mermaid"] text { fill: #1a1a2e !important; }
+  [id^="cf-mermaid"] .edgePath path { stroke: #4a6cf7 !important; }
+  [id^="cf-mermaid"] .arrowheadPath { fill: #4a6cf7 !important; }
+  [id^="cf-mermaid"] line { stroke: #cbd5e0 !important; }
   /* progress bars in export */
   [style*="--color-accent"] { color: #3b82f6; }
   [style*="background:var(--color-accent)"] { background: #3b82f6 !important; }

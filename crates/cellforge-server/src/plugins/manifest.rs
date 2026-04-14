@@ -128,7 +128,7 @@ mod tests {
         assert!(is_valid_plugin_name("foo-bar"));
         assert!(is_valid_plugin_name("a1b2"));
         assert!(is_valid_plugin_name("solarized-dark"));
-        assert!(is_valid_plugin_name("bliss-mermaid-v2"));
+        assert!(is_valid_plugin_name("cellforge-mermaid-v2"));
         assert!(is_valid_plugin_name("z"));
         // 64 chars exactly — the upper bound
         assert!(is_valid_plugin_name(&"a".repeat(64)));
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn manifest_parses_full_json() {
         let json = r##"{
-            "name": "bliss-mermaid",
+            "name": "cellforge-mermaid",
             "version": "0.2.1",
             "display_name": "Mermaid",
             "description": "Render mermaid diagrams",
@@ -182,13 +182,13 @@ mod tests {
                     {"id": "warm", "name": "Warm", "vars": {"--color-accent": "#ff6600"}}
                 ],
                 "widgets": [
-                    {"tag_name": "bliss-mermaid", "module": "frontend/plugin.js", "stateful": false}
+                    {"tag_name": "cellforge-mermaid", "module": "frontend/plugin.js", "stateful": false}
                 ],
                 "pylib": ["mermaid.py"]
             }
         }"##;
         let m: PluginManifest = serde_json::from_str(json).unwrap();
-        assert_eq!(m.name, "bliss-mermaid");
+        assert_eq!(m.name, "cellforge-mermaid");
         assert_eq!(m.version, "0.2.1");
         assert_eq!(m.author.as_deref(), Some("someone"));
         assert_eq!(m.contributes.themes.len(), 1);
@@ -201,7 +201,7 @@ mod tests {
             Some("#ff6600"),
         );
         assert_eq!(m.contributes.widgets.len(), 1);
-        assert_eq!(m.contributes.widgets[0].tag_name, "bliss-mermaid");
+        assert_eq!(m.contributes.widgets[0].tag_name, "cellforge-mermaid");
         assert_eq!(m.contributes.pylib, vec!["mermaid.py"]);
     }
 

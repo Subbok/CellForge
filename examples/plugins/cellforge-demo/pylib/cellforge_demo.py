@@ -4,9 +4,9 @@ CellForge Demo Plugin — Python helpers.
 Tests that plugin pylib gets injected into kernel PYTHONPATH.
 
 Usage:
-    import bliss_demo
-    bliss_demo.chart([10, 30, 50, 20, 40], labels=["A","B","C","D","E"])
-    bliss_demo.info()
+    import cellforge_demo
+    cellforge_demo.chart([10, 30, 50, 20, 40], labels=["A","B","C","D","E"])
+    cellforge_demo.info()
 """
 
 
@@ -34,7 +34,7 @@ class DemoChart:
 def chart(values, labels=None, title="Demo Chart"):
     """Create a demo bar chart.
 
-    The chart is rendered by the bliss-demo frontend plugin — it won't
+    The chart is rendered by the cellforge-demo frontend plugin — it won't
     display in a plain Python REPL.
     """
     return DemoChart(values, labels=labels, title=title)
@@ -42,8 +42,8 @@ def chart(values, labels=None, title="Demo Chart"):
 
 def info():
     """Print plugin info — proves the pylib import works."""
-    print("bliss-demo plugin v0.1.0")
+    print("cellforge-demo plugin v0.1.0")
     print(f"  module: {__file__}")
     print("  contributes: theme, widget, toolbar, sidebar, cell action,")
     print("                keybinding, export format, status bar item")
-    return "bliss-demo loaded OK"
+    return "cellforge-demo loaded OK"

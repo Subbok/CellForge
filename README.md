@@ -2,7 +2,7 @@
 
 > A modern notebook IDE — Rust backend, React frontend, real Jupyter kernels, live collaboration, and PDF export via Typst.
 
-![version](https://img.shields.io/badge/version-0.3.0-blue)
+![version](https://img.shields.io/badge/version-0.3.5-blue)
 ![rust](https://img.shields.io/badge/rust-2024-orange)
 ![react](https://img.shields.io/badge/react-19-61dafb)
 ![status](https://img.shields.io/badge/status-work%20in%20progress-yellow)
@@ -15,13 +15,13 @@
 
 ## 🌟 Highlights
 
-- **Multi-language kernels** — Python, R (IRkernel), and Julia (IJulia) with automatic detection. Discovers conda envs, venvs, and system installs. Fixes `PATH`/`CONDA_PREFIX` so `!pip install` lands in the right environment. Cross-platform: Linux, macOS, Windows.
+- **Any Jupyter kernel** — works with every standard Jupyter kernel: Python (ipykernel), R (IRkernel), Julia (IJulia), JavaScript (ijavascript), Kotlin, Go, and anything else that speaks the Jupyter wire protocol. Discovers conda envs, venvs, and system installs automatically. Fixes `PATH`/`CONDA_PREFIX` so `!pip install` lands in the right environment. Cross-platform: Linux, macOS, Windows.
 - **Multi-kernel notebooks** — use Python, R, and Julia in the same notebook. Per-cell language selector, automatic variable sharing between kernels via JSON/Arrow serialization.
 - **Live collaboration out of the box** — Yjs CRDT over WebSocket with remote cursors, shared Y.Text per cell, broadcasted cell operations (add/delete/move), per-notebook kernel sharing.
 - **Reactive execution** — an AST-based dependency analyzer rebuilds the cell DAG on every edit and auto-reruns downstream cells when an upstream variable changes.
-- **Built-in visualization library** — `import cellforge as bl` gives you bar/line/pie/hbar charts, flow/sequence diagrams, stat tiles, callouts, progress bars, and interactive widgets — all without `pip install`. Works in the notebook, HTML export, and PDF export. [Full docs →](https://github.com/Subbok/cellforge/wiki/Build-in-Library)
+- **Built-in visualization library** — `import cellforge as cf` gives you bar/line/pie/hbar charts, flow/sequence diagrams, stat tiles, callouts, progress bars, and interactive widgets — all without `pip install`. Works in the notebook, HTML export, and PDF export. [Full docs →](https://github.com/Subbok/cellforge/wiki/Build-in-Library)
 - **Plugin system** — upload a zip to add themes, Python helpers, custom output renderers, toolbar buttons, sidebar panels, keyboard shortcuts, export formats, cell actions, and status bar items. Admin can control who installs plugins. [Writing plugins →](https://github.com/Subbok/cellforge/wiki/Writing-Plugins)
-- **PDF export via Typst** — custom `.typ` templates with variable substitution, built-in lab-report template, HTML export as a fallback, no LaTeX install required. [Writing templates →](https://github.com/Subbok/cellforge/wiki/Writing-Typst-Templates)
+- **PDF export via Typst** — the Typst compiler is embedded directly in the binary — no separate install, no LaTeX, no external tools. Custom `.typ` templates with variable substitution, built-in lab-report template, HTML export as a fallback. [Writing templates →](https://github.com/Subbok/cellforge/wiki/Writing-Typst-Templates)
 - **Hub mode** — `--hub` flag enables resource limits per user/group, admin panel with live kernel monitoring, user/group management. Works from a single binary — no JupyterHub, no nginx, no PostgreSQL.
 - **Multi-user with per-user workspaces** — SQLite-backed accounts, JWT cookies, admin role, cross-user file sharing, isolated notebook directories.
 - **Split-view sidebar** — Variables, Files, TOC, History, Dependencies (+ plugin panels) can be stacked two at a time with a resizable divider.
@@ -32,6 +32,8 @@
 CellForge is a Jupyter-flavored notebook environment built around a Rust axum server and a React + TypeScript + Monaco frontend. It talks to real Jupyter kernels over ZeroMQ using the standard messaging protocol, so any `ipykernel` install should work — including niche conda envs, venvs, and system Python.
 
 It was built as a single-developer project to explore what a notebook IDE looks like when you don't start from Jupyter's Tornado server: you get proper per-user workspaces, a real live-collaboration layer, PDF export that doesn't need a LaTeX install, and an editor that feels responsive because the frontend never blocks on server round-trips for structural edits.
+
+CellForge ships as a single portable binary (~30 MB) that includes the web frontend, the Typst PDF compiler, and the server. Compare that to a typical Jupyter setup: JupyterLab (~150 MB pip install) plus a LaTeX distribution for PDF export (~2–4 GB for TeX Live). CellForge replaces all of that with one download.
 
 It's *not* a drop-in JupyterLab replacement — but it's gaining ground fast. It's a focused, opinionated tool for writing notebooks and producing readable PDFs from them.
 
@@ -48,14 +50,18 @@ Open http://localhost:8888 — notebooks are stored in `~/notebooks`.
 
 Portable binaries for every release are on the [Releases](../../releases) page — one file per platform, no install required:
 
-| Platform | File | Run |
+| Platform | Server (browser) | Desktop app |
 |---|---|---|
-| Linux x64 | `cellforge-linux-x64` | `chmod +x cellforge-linux-x64 && ./cellforge-linux-x64` |
-| macOS x64 | `cellforge-macos-x64` | `chmod +x cellforge-macos-x64 && ./cellforge-macos-x64` |
-| macOS ARM | `cellforge-macos-arm64` | `chmod +x cellforge-macos-arm64 && ./cellforge-macos-arm64` |
-| Windows x64 | `cellforge-windows-x64.exe` | Double-click or run from PowerShell |
+| Linux x64 | `cellforge-linux-x64` | `cellforge-linux-x64-desktop` |
+| Linux ARM64 | `cellforge-linux-arm64` | — |
+| macOS x64 | `cellforge-macos-x64` | `cellforge-macos-x64-desktop` |
+| macOS ARM | `cellforge-macos-arm64` | `cellforge-macos-arm64-desktop` |
+| Windows x64 | `cellforge-windows-x64.exe` | `cellforge-windows-x64-desktop.exe` |
+| Windows ARM64 | `cellforge-windows-arm64.exe` | `cellforge-windows-arm64-desktop.exe` |
 
-The frontend is embedded in the binary — no unpacking, no Node.js, just download and run. Open http://localhost:8888 in your browser.
+**Server** — opens in your browser at http://localhost:8888. One portable binary with the frontend embedded.
+
+**Desktop** — native window (system webview), no browser needed. Same features, starts the server in the background automatically.
 
 ## 🚀 Quick start (from source)
 
@@ -126,6 +132,7 @@ The backend is a cargo workspace of seven focused crates:
 | `cellforge-varexplorer` | Runtime variable introspection over the kernel |
 | `cellforge-export` | Typst-based PDF compiler, HTML export, template management |
 | `cellforge-auth` | SQLite user database, JWT cookies, password hashing |
+| `cellforge-config` | Centralized XDG-compliant config path helpers |
 
 The frontend is a single Vite + React 19 app:
 

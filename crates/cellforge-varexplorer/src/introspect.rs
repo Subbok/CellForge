@@ -3,50 +3,50 @@
 /// in the notebook outputs or increment the execution counter.
 ///
 /// Returns JSON with all user-defined variables and their basic info.
-/// We prefix everything with __bliss_ to avoid polluting the user's namespace,
+/// We prefix everything with __cf_ to avoid polluting the user's namespace,
 /// and clean up after ourselves.
 pub const INSPECT_VARIABLES: &str = r#"
-import json as __bliss_json
+import json as __cf_json
 
 # ipython/jupyter internals we never want to show
-__bliss_skip = {
+__cf_skip = {
     'In', 'Out', 'get_ipython', 'exit', 'quit', 'open',
-    '__bliss_json', '__bliss_skip', '__bliss_out', '__bliss_n', '__bliss_v', '__bliss_info',
+    '__cf_json', '__cf_skip', '__cf_out', '__cf_n', '__cf_v', '__cf_info',
 }
 
-__bliss_out = {}
-for __bliss_n, __bliss_v in list(globals().items()):
-    if __bliss_n.startswith('_'):
+__cf_out = {}
+for __cf_n, __cf_v in list(globals().items()):
+    if __cf_n.startswith('_'):
         continue
-    if __bliss_n in __bliss_skip:
+    if __cf_n in __cf_skip:
         continue
     # skip modules, builtins, and ipython magic
-    __bliss_t = type(__bliss_v).__name__
-    if __bliss_t == 'module':
+    __cf_t = type(__cf_v).__name__
+    if __cf_t == 'module':
         continue
-    if __bliss_t in ('ZMQExitAutocall', 'BuiltinMethodType', 'builtin_function_or_method'):
+    if __cf_t in ('ZMQExitAutocall', 'BuiltinMethodType', 'builtin_function_or_method'):
         continue
 
-    __bliss_info = {
-        'name': __bliss_n,
-        'type': __bliss_t,
-        'module': type(__bliss_v).__module__,
+    __cf_info = {
+        'name': __cf_n,
+        'type': __cf_t,
+        'module': type(__cf_v).__module__,
     }
     try:
-        if hasattr(__bliss_v, 'shape'):
-            __bliss_info['shape'] = str(__bliss_v.shape)
-        if hasattr(__bliss_v, 'dtype'):
-            __bliss_info['dtype'] = str(__bliss_v.dtype)
-        if hasattr(__bliss_v, '__len__') and not isinstance(__bliss_v, str):
-            __bliss_info['size'] = len(__bliss_v)
-        __bliss_info['repr'] = repr(__bliss_v)[:500]
+        if hasattr(__cf_v, 'shape'):
+            __cf_info['shape'] = str(__cf_v.shape)
+        if hasattr(__cf_v, 'dtype'):
+            __cf_info['dtype'] = str(__cf_v.dtype)
+        if hasattr(__cf_v, '__len__') and not isinstance(__cf_v, str):
+            __cf_info['size'] = len(__cf_v)
+        __cf_info['repr'] = repr(__cf_v)[:500]
     except Exception:
-        __bliss_info['repr'] = '<error>'
+        __cf_info['repr'] = '<error>'
 
-    __bliss_out[__bliss_n] = __bliss_info
+    __cf_out[__cf_n] = __cf_info
 
-print(__bliss_json.dumps(__bliss_out))
-del __bliss_out, __bliss_n, __bliss_v, __bliss_info, __bliss_json, __bliss_skip, __bliss_t
+print(__cf_json.dumps(__cf_out))
+del __cf_out, __cf_n, __cf_v, __cf_info, __cf_json, __cf_skip, __cf_t
 "#;
 
 /// Returns a preview of a DataFrame variable. Takes the variable name as
@@ -57,19 +57,19 @@ pub fn dataframe_preview_code(var_name: &str) -> String {
     // a security issue — they can already run arbitrary code
     format!(
         r#"
-import json as __bliss_json
-__bliss_df = globals().get('{var_name}')
-if __bliss_df is not None and hasattr(__bliss_df, 'head'):
-    print(__bliss_json.dumps({{
-        'columns': list(__bliss_df.columns),
-        'dtypes': {{str(k): str(v) for k, v in __bliss_df.dtypes.items()}},
-        'shape': list(__bliss_df.shape),
-        'head': __bliss_df.head(50).fillna('NaN').to_dict(orient='records'),
+import json as __cf_json
+__cf_df = globals().get('{var_name}')
+if __cf_df is not None and hasattr(__cf_df, 'head'):
+    print(__cf_json.dumps({{
+        'columns': list(__cf_df.columns),
+        'dtypes': {{str(k): str(v) for k, v in __cf_df.dtypes.items()}},
+        'shape': list(__cf_df.shape),
+        'head': __cf_df.head(50).fillna('NaN').to_dict(orient='records'),
     }}))
 else:
     print('null')
-del __bliss_json
-if '__bliss_df' in dir(): del __bliss_df
+del __cf_json
+if '__cf_df' in dir(): del __cf_df
 "#
     )
 }

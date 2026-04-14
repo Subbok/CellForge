@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { ArrowUpRight, X, Anvil } from 'lucide-react';
 
 const DISMISSED_KEY = 'cellforge_dismissed_update';
 
 export function UpdateNotice() {
+  const { t } = useTranslation();
   const [info, setInfo] = useState<{
     latest: string;
     download_url: string;
@@ -51,10 +53,10 @@ export function UpdateNotice() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-text">
-                CellForge v{info.latest}
+                {t('update.newVersion', { version: info.latest })}
               </p>
               <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">
-                A new version is available.
+                {t('update.available')}
               </p>
               <div className="flex items-center gap-2 mt-3">
                 <a
@@ -65,13 +67,13 @@ export function UpdateNotice() {
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accent text-accent-fg text-xs font-medium rounded-lg
                     hover:bg-accent-hover shadow-sm shadow-accent/20 hover:shadow-accent/30 active:scale-[0.97] transition-all"
                 >
-                  Download <ArrowUpRight size={12} />
+                  {t('update.download')} <ArrowUpRight size={12} />
                 </a>
                 <button
                   onClick={dismiss}
                   className="text-[11px] text-text-muted hover:text-text-secondary transition-colors px-2 py-1.5"
                 >
-                  Dismiss
+                  {t('update.dismiss')}
                 </button>
               </div>
             </div>
