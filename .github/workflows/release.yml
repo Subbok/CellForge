@@ -77,7 +77,7 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      # --- Cross-compilation setup ---
+      # --- Platform setup ---
 
       - name: Install cross-compilation tools (Linux ARM)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -91,70 +91,59 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 
-      # --- Build server binary ---
+      # --- Build ---
 
-      - name: Build portable binary
+      - name: Build server
         run: cargo build --release --target ${{ matrix.target }} -p cellforge-server --features embed-frontend
-
-      # --- Build desktop app ---
 
       - name: Build desktop app
         if: matrix.desktop
         run: cargo build --release --target ${{ matrix.target }} -p cellforge-app
-        continue-on-error: true
 
-      # --- Package desktop: Linux AppImage ---
+      # --- Package: Linux AppImage ---
 
       - name: Package AppImage (Linux)
         if: matrix.desktop && runner.os == 'Linux'
-        continue-on-error: true
         run: |
-          if [ ! -f target/${{ matrix.target }}/release/cellforge-app ]; then
-            echo "Desktop binary not found, skipping AppImage"
-            exit 0
-          fi
-
-          # Download linuxdeploy
+          # Download and EXTRACT linuxdeploy (no FUSE on CI runners)
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appimage-extract
+          mv squashfs-root linuxdeploy-extracted
 
+          # Download GTK plugin
           wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
           chmod +x linuxdeploy-plugin-gtk.sh
 
           # Build AppDir
           mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
           cp target/${{ matrix.target }}/release/cellforge-app AppDir/usr/bin/cellforge-app
           chmod +x AppDir/usr/bin/cellforge-app
+          cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/cellforge.png
 
-          # Package
+          # Package with extracted linuxdeploy
           export DEPLOY_GTK_VERSION=3
-          ./linuxdeploy-x86_64.AppImage \
+          export PATH="$PWD:$PATH"
+          ./linuxdeploy-extracted/AppRun \
             --appdir AppDir \
             --plugin gtk \
             --desktop-file assets/cellforge.desktop \
             --icon-file assets/icon.png \
-            --output appimage || true
+            --output appimage
 
           # Rename output
-          if ls CellForge-*.AppImage 1>/dev/null 2>&1; then
-            mv CellForge-*.AppImage ${{ matrix.artifact }}-desktop.AppImage
-          elif ls cellforge-app-*.AppImage 1>/dev/null 2>&1; then
-            mv cellforge-app-*.AppImage ${{ matrix.artifact }}-desktop.AppImage
-          fi
+          mv CellForge*.AppImage ${{ matrix.artifact }}-desktop.AppImage 2>/dev/null || \
+          mv cellforge*.AppImage ${{ matrix.artifact }}-desktop.AppImage 2>/dev/null || \
+          mv *.AppImage ${{ matrix.artifact }}-desktop.AppImage
 
-      # --- Package desktop: macOS .dmg ---
+      # --- Package: macOS .dmg ---
 
       - name: Package .dmg (macOS)
         if: matrix.desktop && runner.os == 'macOS'
-        continue-on-error: true
         run: |
-          if [ ! -f target/${{ matrix.target }}/release/cellforge-app ]; then
-            echo "Desktop binary not found, skipping .dmg"
-            exit 0
-          fi
-
           # Generate .icns from PNG
           mkdir -p icon.iconset
           sips -z 16 16     assets/icon-1024.png --out icon.iconset/icon_16x16.png
@@ -176,26 +165,27 @@ jobs:
           chmod +x "$APP/MacOS/cellforge-app"
           cp icon.icns "$APP/Resources/icon.icns"
 
+          # Write Info.plist (no indentation to avoid whitespace in XML)
           VERSION=${GITHUB_REF_NAME#v}
-          cat > "$APP/Info.plist" << PLIST
+          cat > "$APP/Info.plist" << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>CFBundleDisplayName</key><string>CellForge</string>
-            <key>CFBundleExecutable</key><string>cellforge-app</string>
-            <key>CFBundleIdentifier</key><string>com.cellforge.app</string>
-            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-            <key>CFBundleName</key><string>CellForge</string>
-            <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-            <key>CFBundleVersion</key><string>1</string>
-            <key>CFBundleIconFile</key><string>icon</string>
-            <key>NSHighResolutionCapable</key><true/>
-            <key>LSMinimumSystemVersion</key><string>10.13</string>
+          <key>CFBundleDisplayName</key><string>CellForge</string>
+          <key>CFBundleExecutable</key><string>cellforge-app</string>
+          <key>CFBundleIdentifier</key><string>com.cellforge.app</string>
+          <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+          <key>CFBundleName</key><string>CellForge</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>CFBundleIconFile</key><string>icon</string>
+          <key>NSHighResolutionCapable</key><true/>
+          <key>LSMinimumSystemVersion</key><string>10.13</string>
           </dict>
           </plist>
-          PLIST
+          EOF
 
           # Ad-hoc codesign
           codesign --force --sign - "build/CellForge.app"
@@ -210,8 +200,9 @@ jobs:
             --icon-size 100 \
             --icon "CellForge.app" 150 185 \
             --app-drop-link 450 185 \
+            --no-internet-enable \
             "${{ matrix.artifact }}-desktop.dmg" \
-            "build/CellForge.app" || true
+            "build/"
 
       # --- Sign server binary (macOS) ---
 
