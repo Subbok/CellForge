@@ -14,7 +14,7 @@ use crate::ws::handler::ws_handler;
 use axum::Router;
 use axum::routing::{delete, get};
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -80,6 +80,44 @@ fn find_dist_dir() -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+/// Origin-header check middleware. State-changing requests (POST/PUT/DELETE/PATCH)
+/// must come from one of these origins. Combined with SameSite=Strict cookies
+/// this blocks CSRF without needing an explicit token scheme. GET is allowed
+/// without an Origin check (browsers don't always send Origin on same-site GETs).
+const ALLOWED_ORIGINS: &[&str] = &[
+    "http://localhost:5173",
+    "http://localhost:8888",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8888",
+];
+
+async fn origin_check(
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::Method;
+    use axum::response::IntoResponse;
+    let is_state_changing = matches!(
+        req.method(),
+        &Method::POST | &Method::PUT | &Method::DELETE | &Method::PATCH
+    );
+    if is_state_changing {
+        let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
+        let allowed = match origin {
+            Some(o) => ALLOWED_ORIGINS.contains(&o),
+            // Missing Origin header on a state-changing request — this happens
+            // for server-side tools (curl, tests) but browsers always send it
+            // on fetch/XHR. Allow it only if there's no Cookie either (i.e. no
+            // ambient auth) — prevents CSRF-via-cookies, still works for CLI.
+            None => req.headers().get("cookie").is_none(),
+        };
+        if !allowed {
+            return (axum::http::StatusCode::FORBIDDEN, "origin check failed").into_response();
+        }
+    }
+    next.run(req).await
 }
 
 fn build_api_router() -> Router<Arc<AppState>> {
@@ -215,6 +253,20 @@ fn build_api_router() -> Router<Arc<AppState>> {
 
 /// Start the CellForge server on the given listener with the provided config.
 pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> anyhow::Result<()> {
+    if config.hub {
+        eprintln!("╔══════════════════════════════════════════════════════════════════╗");
+        eprintln!("║  SECURITY WARNING                                                ║");
+        eprintln!("║                                                                  ║");
+        eprintln!("║  Hub mode is enabled but kernel isolation is NOT implemented.    ║");
+        eprintln!("║  All user kernels run as the same OS user as the server.         ║");
+        eprintln!("║  Any authenticated user can read the server's files, including   ║");
+        eprintln!("║  other users' notebooks and the auth database.                   ║");
+        eprintln!("║                                                                  ║");
+        eprintln!("║  DO NOT use hub mode for untrusted users.                        ║");
+        eprintln!("║  Full isolation planned for v1.1 (bubblewrap / docker).          ║");
+        eprintln!("╚══════════════════════════════════════════════════════════════════╝");
+    }
+
     let state = Arc::new(AppState::new(&config));
 
     // non-blocking update check
@@ -226,14 +278,32 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
 
     let api = build_api_router();
 
-    // background reaper: every 30s, kill any idle kernels that have no connected clients
+    // background reaper: every 30s, kill any idle kernels that have no connected clients.
+    // Snapshot the IDs under the lock, then stop kernels one-at-a-time so the
+    // lock is released between teardowns — otherwise 2s-per-kernel wait stacks
+    // up and blocks every WS handler during the sweep.
     let app_state = state.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            let mut km = app_state.kernels.lock().await;
-            let killed = km.cleanup_idle().await;
+            let idle: Vec<String> = {
+                let km = app_state.kernels.lock().await;
+                km.idle_kernel_ids()
+            };
+            let mut killed = 0;
+            for id in idle {
+                let mut km = app_state.kernels.lock().await;
+                // recheck refs under the lock — a client may have re-attached
+                // between snapshot and this iteration
+                let still_idle = km
+                    .get(&id)
+                    .map(|k| k.ref_count.load(std::sync::atomic::Ordering::Relaxed) == 0)
+                    .unwrap_or(false);
+                if still_idle && km.stop(&id).await.is_ok() {
+                    killed += 1;
+                }
+            }
             if killed > 0 {
                 tracing::info!("reaper: killed {killed} idle kernels");
             }
@@ -266,8 +336,39 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
         }
     }
 
+    // Allowed origins for CORS + Origin-header check middleware.
+    // Any state-changing request (POST/PUT/DELETE/PATCH) whose `Origin` is
+    // absent or not in this list is rejected — combined with SameSite=Strict
+    // cookies, this gives us CSRF protection without a token scheme.
+    let allowed_origins: Vec<axum::http::HeaderValue> = [
+        "http://localhost:5173",
+        "http://localhost:8888",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8888",
+    ]
+    .iter()
+    .filter_map(|s| axum::http::HeaderValue::from_str(s).ok())
+    .collect();
+
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(allowed_origins))
+        .allow_credentials(true)
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+            axum::http::Method::PATCH,
+        ])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::COOKIE,
+            axum::http::header::AUTHORIZATION,
+        ]);
+
     let app = app
-        .layer(CorsLayer::permissive())
+        .layer(axum::middleware::from_fn(origin_check))
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

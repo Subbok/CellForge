@@ -53,9 +53,6 @@ pub async fn export_pdf(Json(req): Json<ExportReq>) -> Result<Response, StatusCo
     let today = chrono::Local::now().format("%d.%m.%Y").to_string();
     typ_source = typ_source.replace("{{today}}", &today);
 
-    // dump for debugging
-    let _ = std::fs::write("/tmp/cellforge_debug.typ", &typ_source);
-
     // convert template assets to the format compile expects
     let assets: std::collections::HashMap<String, Vec<u8>> = tmpl_assets;
 

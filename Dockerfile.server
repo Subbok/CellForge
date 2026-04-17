@@ -48,4 +48,4 @@ RUN /opt/python/3.12/bin/python3 -m pip install --upgrade pip && \
 
 EXPOSE 8888
 WORKDIR /data
-ENTRYPOINT ["cellforge-server", "--host", "0.0.0.0"]
+ENTRYPOINT ["cellforge-server", "--allow-network"]

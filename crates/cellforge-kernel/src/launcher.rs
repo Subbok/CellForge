@@ -126,7 +126,7 @@ pub async fn launch_kernel(
     spec_name: &str,
     cwd: Option<&std::path::Path>,
     extra_pythonpath: &[std::path::PathBuf],
-) -> Result<(ConnectionInfo, Child)> {
+) -> Result<(ConnectionInfo, Child, std::path::PathBuf)> {
     let (spec_dir, spec) = find_kernelspec(spec_name)?;
 
     let ports = pick_free_ports(5)?;
@@ -255,7 +255,7 @@ pub async fn launch_kernel(
     // give it a moment to start up and bind its sockets
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    Ok((conn, child))
+    Ok((conn, child, conn_file))
 }
 
 struct EnvInfo {

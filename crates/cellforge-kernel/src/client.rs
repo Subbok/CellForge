@@ -165,6 +165,32 @@ impl KernelClient {
         .await
     }
 
+    /// Execute code without adding to history, but still broadcast output on
+    /// iopub. Used for introspection/variable injection — we want the output
+    /// (so we can parse it) but not polluting user history or execution count.
+    ///
+    /// `silent=true` makes IRkernel and some other kernels suppress stream
+    /// output entirely, which defeats introspection. This variant sends
+    /// `silent=false, store_history=false` — the output IS broadcast on iopub
+    /// and the backend filters it by `parent_msg_id` so the user never sees it.
+    pub async fn execute_no_history(&mut self, code: &str) -> Result<String> {
+        self.send_shell(
+            "execute_request",
+            serde_json::json!({
+                "code": code,
+                "silent": false,
+                "store_history": false,
+                "user_expressions": {},
+                "allow_stdin": false,
+                // Don't cascade aborts to the user's next cell if our internal
+                // introspection/injection code errors — we handle errors on
+                // the backend and the user shouldn't see them.
+                "stop_on_error": false,
+            }),
+        )
+        .await
+    }
+
     pub async fn kernel_info(
         &mut self,
         shell_rx: &mut mpsc::Receiver<JupyterMessage>,

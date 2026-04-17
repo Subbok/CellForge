@@ -40,3 +40,4 @@ __pycache__/
 # Screenshots (but not assets/)
 *.png
 !assets/*.png
+Dockerfile.server.build

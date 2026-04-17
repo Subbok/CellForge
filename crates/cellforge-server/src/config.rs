@@ -5,12 +5,16 @@ use std::path::PathBuf;
 #[command(name = "cellforge", about = "CellForge notebook server")]
 pub struct Config {
     /// Host address to bind to
-    #[arg(long, default_value = "0.0.0.0")]
+    #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 
     /// Port to listen on
     #[arg(long, default_value_t = 8888)]
     pub port: u16,
+
+    /// Allow network access — bind to 0.0.0.0 so other machines on the LAN can reach the server
+    #[arg(long)]
+    pub allow_network: bool,
 
     /// Working directory for notebooks
     #[arg(long, default_value = ".")]

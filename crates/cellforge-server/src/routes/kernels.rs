@@ -1,7 +1,8 @@
+use crate::routes::auth::extract_user;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use cellforge_kernel::launcher::discover_kernelspecs;
 use serde::{Deserialize, Serialize};
@@ -17,7 +18,8 @@ pub struct KernelSpecEntry {
     spec_name: String,        // actual kernelspec name (e.g. "python3")
 }
 
-pub async fn list_specs() -> impl IntoResponse {
+pub async fn list_specs(headers: HeaderMap) -> Result<impl IntoResponse, StatusCode> {
+    let _username = extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let raw = discover_kernelspecs();
 
     let mut entries: Vec<KernelSpecEntry> = raw
@@ -115,7 +117,7 @@ pub async fn list_specs() -> impl IntoResponse {
         });
     }
 
-    Json(entries)
+    Ok(Json(entries))
 }
 
 fn detect_env_from_path(
@@ -210,7 +212,7 @@ fn find_conda_envs_without_kernel() -> Vec<(String, std::path::PathBuf)> {
 
 /// Find standalone Python installations (non-conda) that don't have ipykernel.
 /// On Windows this covers python.org installs, the `py` launcher, and MSYS2.
-fn find_pythons_without_kernel() -> Vec<(String, std::path::PathBuf)> {
+pub fn find_pythons_without_kernel() -> Vec<(String, std::path::PathBuf)> {
     let mut out = vec![];
     let mut seen_prefixes = std::collections::HashSet::new();
 
@@ -421,8 +423,12 @@ pub struct SessionEntry {
     kernel_name: String,
 }
 
-pub async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let lock = state.sessions.read().unwrap();
+pub async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, StatusCode> {
+    let _username = extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let lock = state.sessions.read();
     let out: Vec<_> = lock
         .values()
         .map(|s| SessionEntry {
@@ -431,7 +437,7 @@ pub async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoRespo
             kernel_name: s.kernel_name.clone(),
         })
         .collect();
-    Json(out)
+    Ok(Json(out))
 }
 
 #[derive(Deserialize)]
@@ -442,8 +448,10 @@ pub struct CreateSessionReq {
 
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<CreateSessionReq>,
 ) -> Result<Json<SessionEntry>, StatusCode> {
+    let _username = extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let id = uuid::Uuid::new_v4().to_string();
     let kernel_name = req.kernel_name.unwrap_or("python3".into());
 
@@ -453,7 +461,7 @@ pub async fn create_session(
         kernel_name: kernel_name.clone(),
         _kernel_id: None,
     };
-    state.sessions.write().unwrap().insert(id.clone(), info);
+    state.sessions.write().insert(id.clone(), info);
 
     Ok(Json(SessionEntry {
         id,
@@ -464,9 +472,11 @@ pub async fn create_session(
 
 pub async fn delete_session(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    match state.sessions.write().unwrap().remove(&id) {
+    let _username = extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    match state.sessions.write().remove(&id) {
         Some(_) => Ok(StatusCode::NO_CONTENT),
         None => Err(StatusCode::NOT_FOUND),
     }

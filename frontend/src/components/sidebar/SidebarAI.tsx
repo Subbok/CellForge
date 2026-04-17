@@ -10,6 +10,14 @@ interface Message {
 }
 
 const CHAT_STORAGE_PREFIX = 'cellforge.ai.chat.';
+/// Cap chat history per notebook. Once hit, oldest messages are dropped on
+/// every save. Prevents one heavy user from filling all ~5MB of localStorage
+/// and silently breaking every other preference store.
+const CHAT_HISTORY_CAP = 100;
+const CHAT_HISTORY_TRIM = 50; // retry target when QuotaExceededError fires
+
+// Only warn once per session so every keystroke doesn't retrigger the toast.
+let quotaWarned = false;
 
 function loadChat(filePath: string | null): Message[] {
   if (!filePath) return [];
@@ -19,15 +27,48 @@ function loadChat(filePath: string | null): Message[] {
   } catch { return []; }
 }
 
-function saveChat(filePath: string | null, messages: Message[]) {
-  if (!filePath) return;
+/**
+ * Persist chat history for a notebook. Returns the array that was actually
+ * persisted — may be trimmed from the input if the cap was hit or if the
+ * browser's quota ran out. Callers should adopt the returned array to keep UI
+ * state consistent with what's on disk.
+ */
+function saveChat(filePath: string | null, messages: Message[]): Message[] {
+  if (!filePath) return messages;
+  // Cap first so we never even try to persist unbounded history
+  const capped =
+    messages.length > CHAT_HISTORY_CAP
+      ? messages.slice(-CHAT_HISTORY_CAP)
+      : messages;
   try {
-    if (messages.length === 0) {
+    if (capped.length === 0) {
       localStorage.removeItem(CHAT_STORAGE_PREFIX + filePath);
     } else {
-      localStorage.setItem(CHAT_STORAGE_PREFIX + filePath, JSON.stringify(messages));
+      localStorage.setItem(CHAT_STORAGE_PREFIX + filePath, JSON.stringify(capped));
     }
-  } catch { /* ignored */ }
+    return capped;
+  } catch (e) {
+    // Quota exceeded: aggressively trim and retry once.
+    const name = e instanceof Error ? e.name : '';
+    if (name === 'QuotaExceededError' || name.includes('Quota')) {
+      const trimmed = capped.slice(-CHAT_HISTORY_TRIM);
+      try {
+        localStorage.setItem(CHAT_STORAGE_PREFIX + filePath, JSON.stringify(trimmed));
+        if (!quotaWarned) {
+          quotaWarned = true;
+          console.warn(
+            '[ai] localStorage quota reached — chat history was trimmed to the last',
+            CHAT_HISTORY_TRIM,
+            'messages. Consider clearing older notebooks\' chat history.'
+          );
+        }
+        return trimmed;
+      } catch {
+        console.error('[ai] could not persist chat history even after trimming');
+      }
+    }
+    return capped;
+  }
 }
 
 export function SidebarAI() {
@@ -41,9 +82,13 @@ export function SidebarAI() {
     setMessages(loadChat(filePath));
   }, [filePath]);
 
-  // persist on change
+  // persist on change — if the persist layer trimmed the history (cap or
+  // quota), adopt the trimmed array so the UI reflects what's actually stored
   useEffect(() => {
-    saveChat(filePath, messages);
+    const persisted = saveChat(filePath, messages);
+    if (persisted.length !== messages.length) {
+      setMessages(persisted);
+    }
   }, [messages, filePath]);
 
   const provider = useUIStore(s => s.aiProvider);

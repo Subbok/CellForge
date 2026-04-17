@@ -10,8 +10,9 @@ use cellforge_auth::db::UserDb;
 use cellforge_kernel::manager::KernelManager;
 use http::Request;
 use http_body_util::BodyExt;
+use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
@@ -37,6 +38,13 @@ fn test_state(dir: &std::path::Path) -> Arc<AppState> {
 /// Collect the full response body as bytes.
 async fn body_bytes(body: Body) -> Vec<u8> {
     body.collect().await.unwrap().to_bytes().to_vec()
+}
+
+/// Build a Cookie header value containing a valid JWT for the given username,
+/// so auth-gated handlers accept the test request.
+fn auth_cookie(username: &str) -> String {
+    let token = cellforge_auth::jwt::create_token(username).expect("create test token");
+    format!("cellforge_token={token}")
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +339,7 @@ async fn kernel_listing_returns_json_array() {
 
     let req = Request::builder()
         .uri("/api/kernelspecs")
+        .header("cookie", auth_cookie("tester"))
         .body(Body::empty())
         .unwrap();
 
@@ -364,6 +373,7 @@ async fn session_create_list_delete() {
         .method("POST")
         .uri("/api/sessions")
         .header("content-type", "application/json")
+        .header("cookie", auth_cookie("tester"))
         .body(Body::from(
             r#"{"notebook_path": "test.ipynb", "kernel_name": "python3"}"#,
         ))
@@ -379,6 +389,7 @@ async fn session_create_list_delete() {
     // list sessions
     let req = Request::builder()
         .uri("/api/sessions")
+        .header("cookie", auth_cookie("tester"))
         .body(Body::empty())
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -391,6 +402,7 @@ async fn session_create_list_delete() {
     let req = Request::builder()
         .method("DELETE")
         .uri(format!("/api/sessions/{session_id}"))
+        .header("cookie", auth_cookie("tester"))
         .body(Body::empty())
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -399,6 +411,7 @@ async fn session_create_list_delete() {
     // list should be empty now
     let req = Request::builder()
         .uri("/api/sessions")
+        .header("cookie", auth_cookie("tester"))
         .body(Body::empty())
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();

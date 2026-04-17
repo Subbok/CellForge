@@ -16,7 +16,6 @@ static SECRET: OnceLock<Vec<u8>> = OnceLock::new();
 
 fn secret() -> &'static [u8] {
     SECRET.get_or_init(|| {
-        // try to load from config, or generate random
         let dir = cellforge_config::config_dir();
         let key_path = dir.join("jwt_secret");
 
@@ -26,21 +25,24 @@ fn secret() -> &'static [u8] {
             return key;
         }
 
-        // generate new secret
-        let key: Vec<u8> = (0..64).map(|_| rand_byte()).collect();
+        let mut key = vec![0u8; 64];
+        getrandom::getrandom(&mut key).expect("getrandom failed — system entropy pool unavailable");
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(&key_path, &key);
+        if let Err(e) = std::fs::write(&key_path, &key) {
+            tracing::error!(
+                "could not persist jwt_secret to {}: {e}",
+                key_path.display()
+            );
+        } else {
+            // chmod 0600 so only the server user can read it
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
         key
     })
-}
-
-fn rand_byte() -> u8 {
-    // poor man's random — good enough for a secret key
-    use std::time::SystemTime;
-    let t = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    ((t.subsec_nanos() ^ t.as_millis() as u32) & 0xFF) as u8
 }
 
 pub fn create_token(username: &str) -> Result<String> {

@@ -1,4 +1,4 @@
-use crate::state::AppState;
+use crate::state::{AppState, notebook_kernel_key};
 use crate::ws::protocol::{self, WsMessage};
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
@@ -8,8 +8,12 @@ use cellforge_kernel::manager::SharedKernelState;
 use cellforge_kernel::messages::JupyterMessage;
 use cellforge_reactive::scheduler;
 use cellforge_varexplorer::introspect;
+use cellforge_varexplorer::introspect_javascript;
 use cellforge_varexplorer::introspect_julia;
+use cellforge_varexplorer::introspect_kotlin;
+use cellforge_varexplorer::introspect_octave;
 use cellforge_varexplorer::introspect_r;
+use cellforge_varexplorer::introspect_ruby;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -140,21 +144,33 @@ async fn handle_socket(
     }
 
     // resolve or start a kernel
+    //
+    // `freshly_started` tracks whether THIS handler started the kernel. If so,
+    // `KernelManager::start()` initialized ref_count=1 on our behalf (the
+    // "creator ref"), and we take it over as the first subscriber instead of
+    // doing fetch_add(1). This closes the race where the reaper could kill a
+    // fresh kernel between `start()` returning and the first `fetch_add`.
     let nb_cwd = notebook_path
         .as_deref()
         .map(|nb| notebook_cwd(&base_dir, nb));
-    let kernel_id = if let Some(ref nb) = notebook_path {
-        // check if a kernel already exists for this notebook
-        let existing = state.notebook_kernels.lock().await.get(nb).cloned();
+    let (kernel_id, freshly_started) = if let Some(ref nb) = notebook_path {
+        // Compose per-user key so user A's `Untitled.ipynb` can't reuse
+        // (hijack) user B's kernel. Unauthenticated connections are rejected
+        // above; "anonymous" is a defensive fallback only.
+        let user_key = username.as_deref().unwrap_or("anonymous");
+        let nb_key = notebook_kernel_key(user_key, nb);
+
+        // check if a kernel already exists for this (user, notebook) pair
+        let existing = state.notebook_kernels.lock().await.get(&nb_key).cloned();
         if let Some(kid) = existing {
             // verify the kernel is still alive in the manager
             let alive = state.kernels.lock().await.get(&kid).is_some();
             if alive {
-                tracing::info!("reusing kernel {kid} for notebook {nb}");
-                kid
+                tracing::info!("reusing kernel {kid} for notebook {nb} (user={user_key})");
+                (kid, false)
             } else {
                 // stale mapping, start fresh
-                state.notebook_kernels.lock().await.remove(nb);
+                state.notebook_kernels.lock().await.remove(&nb_key);
                 match start_new_kernel(&state, &kernel_name, nb_cwd.as_deref(), &extra_pythonpath)
                     .await
                 {
@@ -163,8 +179,8 @@ async fn handle_socket(
                             .notebook_kernels
                             .lock()
                             .await
-                            .insert(nb.clone(), id.clone());
-                        id
+                            .insert(nb_key.clone(), id.clone());
+                        (id, true)
                     }
                     Err(e) => {
                         send_boot_error(ws_tx, &e).await;
@@ -180,8 +196,8 @@ async fn handle_socket(
                         .notebook_kernels
                         .lock()
                         .await
-                        .insert(nb.clone(), id.clone());
-                    id
+                        .insert(nb_key.clone(), id.clone());
+                    (id, true)
                 }
                 Err(e) => {
                     send_boot_error(ws_tx, &e).await;
@@ -192,7 +208,7 @@ async fn handle_socket(
     } else {
         // no notebook specified, always start a new kernel
         match start_new_kernel(&state, &kernel_name, None, &extra_pythonpath).await {
-            Ok(id) => id,
+            Ok(id) => (id, true),
             Err(e) => {
                 send_boot_error(ws_tx, &e).await;
                 return;
@@ -210,7 +226,12 @@ async fn handle_socket(
                 return;
             }
         };
-        k.ref_count.fetch_add(1, Ordering::Relaxed);
+        // If we just started this kernel, take over the creator ref that
+        // `KernelManager::start()` installed (ref_count=1). Otherwise this is
+        // a reused kernel with its own live subscribers — bump ref_count.
+        if !freshly_started {
+            k.ref_count.fetch_add(1, Ordering::Relaxed);
+        }
         (
             k.iopub_tx.subscribe(),
             k.shell_tx.subscribe(),
@@ -351,11 +372,17 @@ async fn handle_socket(
         };
 
         if should_stop {
-            // only remove notebook->kernel mapping for the default kernel
+            // only remove notebook->kernel mapping for the default kernel.
+            // Must use the same `{username}::{notebook_path}` key we inserted
+            // under, otherwise a stale entry would linger forever and a
+            // second connection for the same notebook would try to reuse
+            // a dead kernel_id.
             if *lang == sess.default_language
                 && let Some(ref nb) = notebook_path
             {
-                state.notebook_kernels.lock().await.remove(nb);
+                let user_key = username.as_deref().unwrap_or("anonymous");
+                let nb_key = notebook_kernel_key(user_key, nb);
+                state.notebook_kernels.lock().await.remove(&nb_key);
             }
             // Remove the kernel session from the DB
             if let Err(e) = state.users.remove_kernel_session(kid) {
@@ -394,10 +421,16 @@ async fn start_new_kernel(
 fn find_spec_for_language(language: &str) -> Option<String> {
     let specs = cellforge_kernel::launcher::discover_kernelspecs();
     let lang_lower = language.to_lowercase();
-    specs
+    let found = specs
         .iter()
         .find(|(_, _, spec)| spec.language.to_lowercase() == lang_lower)
-        .map(|(name, _, _)| name.clone())
+        .map(|(name, _, _)| name.clone());
+    tracing::info!(
+        "find_spec_for_language({language}): {} specs discovered, match={:?}",
+        specs.len(),
+        found
+    );
+    found
 }
 
 /// Ensure a kernel for the requested language is running in this session.
@@ -419,21 +452,54 @@ async fn ensure_kernel_for_language(
     }
 
     // find a kernelspec that matches this language
-    let spec_name = find_spec_for_language(language)
-        .ok_or_else(|| format!("no kernelspec found for language '{language}'"))?;
+    let spec_name = find_spec_for_language(language).ok_or_else(|| {
+        if language == "python" {
+            // enumerate Pythons that are installed but missing ipykernel, and
+            // build a concrete `pip install` suggestion for each so the user
+            // can just copy-paste one line.
+            let suggestions = crate::routes::kernels::find_pythons_without_kernel()
+                .into_iter()
+                .map(|(label, prefix)| {
+                    let interpreter = if cfg!(windows) {
+                        let win_exe = prefix.join("python.exe");
+                        if win_exe.exists() {
+                            win_exe
+                        } else {
+                            prefix.join("Scripts").join("python.exe")
+                        }
+                    } else {
+                        prefix.join("bin").join("python")
+                    };
+                    format!("  {} -m pip install ipykernel  # {label}", interpreter.display())
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if suggestions.is_empty() {
+                "No Python kernel found. Install one: `pip install ipykernel` then restart CellForge.".to_string()
+            } else {
+                format!("No Python kernel found. Run one of these to enable:\n{suggestions}")
+            }
+        } else {
+            format!("no kernelspec found for language '{language}'")
+        }
+    })?;
 
     tracing::info!("starting new kernel for language={language}, spec={spec_name}");
 
     // start the kernel
     let kernel_id = start_new_kernel(state, &spec_name, cwd, extra_pythonpath).await?;
 
-    // subscribe to broadcast channels
+    // subscribe to broadcast channels.
+    //
+    // We just started this kernel, so `KernelManager::start()` initialized
+    // ref_count=1 on our behalf (the creator ref). Take it over as the first
+    // subscriber instead of fetch_add'ing — otherwise the reaper could kill
+    // the kernel in the race window before we register.
     let (iopub_rx, shell_rx, shared) = {
         let km = state.kernels.lock().await;
         let k = km
             .get(&kernel_id)
             .ok_or_else(|| format!("kernel {kernel_id} vanished after start"))?;
-        k.ref_count.fetch_add(1, Ordering::Relaxed);
         (
             k.iopub_tx.subscribe(),
             k.shell_tx.subscribe(),
@@ -573,20 +639,26 @@ async fn handle_client_msg(
                 .get("cell_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            // Task 10: extract optional language field, default to session default
+            // Task 10: extract optional language field, default to session default.
+            // Always lowercase so "Python" vs "python" don't end up in different buckets.
             let language = msg
                 .payload
                 .get("language")
                 .and_then(|v| v.as_str())
                 .unwrap_or(&sess.default_language)
-                .to_string();
+                .to_lowercase();
+            let default_lang_lower = sess.default_language.to_lowercase();
+
+            tracing::info!(
+                "execute_request cell={cell_id} requested_lang={language} default_lang={default_lang_lower}"
+            );
 
             if code.is_empty() {
                 return;
             }
 
             // ensure a kernel is running for this language (lazy start)
-            let kernel_id = if language == sess.default_language {
+            let kernel_id = if language == default_lang_lower {
                 // fast path: use the default kernel
                 match kernel_id_for_language(sess, &language).await {
                     Some(id) => id,
@@ -624,15 +696,28 @@ async fn handle_client_msg(
                 None => return,
             };
 
-            // If executing in a non-default language, inject shared variables first
-            if language != sess.default_language {
-                let ns = sess.shared_namespace.lock().await;
-                let injections = ns.injection_code_for(&language);
+            // Inject vars from other kernels into this one before executing the
+            // user's code. `injection_code_for` filters out vars whose source
+            // language matches the target, so this is safe to run on every
+            // kernel including the default one.
+            //
+            // Release the `ns` lock BEFORE awaiting execute — the iopub handler
+            // also needs this lock to record introspection results.
+            {
+                let injections = {
+                    let ns = sess.shared_namespace.lock().await;
+                    ns.injection_code_for(&language)
+                };
                 if !injections.is_empty() {
                     let inject_code = injections.join("\n");
+                    tracing::info!(
+                        "injecting {} vars into {language}: {}",
+                        injections.len(),
+                        inject_code.replace('\n', " | ")
+                    );
                     let mut km = state.kernels.lock().await;
                     if let Some(k) = km.get_mut(&kernel_id)
-                        && let Err(e) = k.client.execute(&inject_code, true).await
+                        && let Err(e) = k.client.execute_no_history(&inject_code).await
                     {
                         tracing::warn!("variable injection failed for {language}: {e}");
                     }
@@ -656,6 +741,22 @@ async fn handle_client_msg(
                             .insert(mid, std::time::Instant::now());
                     }
                     Err(e) => tracing::error!("exec fail: {e}"),
+                }
+            }
+        }
+        protocol::CELL_DELETED => {
+            // Frontend deleted a cell — prune server-side state so `cell_sources`
+            // (the reactive-DAG input map) doesn't leak an entry per dead cell.
+            // Wipe from every running kernel's SharedKernelState.
+            let cell_id = msg
+                .payload
+                .get("cell_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !cell_id.is_empty() {
+                let states = sess.kernel_states.lock().await;
+                for shared in states.values() {
+                    shared.cell_sources.lock().await.remove(cell_id);
                 }
             }
         }
@@ -723,13 +824,17 @@ async fn handle_client_msg(
             let code = match language {
                 "r" | "R" => introspect_r::dataframe_preview_code(name),
                 "julia" => introspect_julia::dataframe_preview_code(name),
+                "octave" => introspect_octave::dataframe_preview_code(name),
+                "javascript" => introspect_javascript::dataframe_preview_code(name),
+                "ruby" => introspect_ruby::dataframe_preview_code(name),
+                "kotlin" => introspect_kotlin::dataframe_preview_code(name),
                 _ => introspect::dataframe_preview_code(name),
             };
             let kid = kernel_id_for_language(sess, language).await;
             if let Some(ref kid) = kid {
                 let mut km = state.kernels.lock().await;
                 if let Some(k) = km.get_mut(kid)
-                    && let Ok(mid) = k.client.execute(&code, true).await
+                    && let Ok(mid) = k.client.execute_no_history(&code).await
                 {
                     sess.detail_ids.lock().await.insert(mid);
                 }
@@ -772,7 +877,7 @@ async fn handle_client_msg(
             if let (Some(ref kid), Some(ref shared)) = (kid, shared) {
                 let mut km = state.kernels.lock().await;
                 if let Some(k) = km.get_mut(kid)
-                    && let Ok(mid) = k.client.execute(&code, true).await
+                    && let Ok(mid) = k.client.execute_no_history(&code).await
                     && !cell_id.is_empty()
                 {
                     shared.msg_to_cell.lock().await.insert(mid, cell_id.into());
@@ -848,13 +953,14 @@ async fn shell_reader(
             }
         }
 
-        // find the cell and compute timing
+        // find the cell and compute timing — remove from msg_to_cell here
+        // (same lifecycle as exec_start) to prevent unbounded growth over a
+        // long session. Each execute_reply finishes a cell's lookup needs.
         let cell_id = shared
             .msg_to_cell
             .lock()
             .await
-            .get(&parent_id)
-            .cloned()
+            .remove(&parent_id)
             .unwrap_or_default();
         let elapsed_ms = shared
             .exec_start
@@ -898,13 +1004,29 @@ async fn shell_reader(
                     let inspect_code = match language {
                         "r" | "R" => introspect_r::INSPECT_VARIABLES,
                         "julia" => introspect_julia::INSPECT_VARIABLES,
+                        "octave" => introspect_octave::INSPECT_VARIABLES,
+                        "javascript" => introspect_javascript::INSPECT_VARIABLES,
+                        "ruby" => introspect_ruby::INSPECT_VARIABLES,
+                        "kotlin" => introspect_kotlin::INSPECT_VARIABLES,
                         _ => introspect::INSPECT_VARIABLES,
                     };
                     let mut km = state.kernels.lock().await;
-                    if let Some(k) = km.get_mut(&kernel_id)
-                        && let Ok(mid) = k.client.execute(inspect_code, true).await
-                    {
-                        shared.introspect_ids.lock().await.insert(mid);
+                    if let Some(k) = km.get_mut(&kernel_id) {
+                        match k.client.execute_no_history(inspect_code).await {
+                            Ok(mid) => {
+                                tracing::info!(
+                                    "triggered introspection for {language} (kernel={kernel_id}, mid={mid})"
+                                );
+                                shared.introspect_ids.lock().await.insert(mid);
+                            }
+                            Err(e) => tracing::warn!(
+                                "failed to trigger introspection for {language}: {e}"
+                            ),
+                        }
+                    } else {
+                        tracing::warn!(
+                            "introspection: kernel {kernel_id} not in manager for {language}"
+                        );
                     }
                 }
                 // remove the trigger guard now that we've issued the request
@@ -916,8 +1038,9 @@ async fn shell_reader(
             }
 
             // reactive deps — only run from the default language's shell reader
-            // to avoid duplicate updates from multiple kernels
-            if language == sess.default_language {
+            // to avoid duplicate updates from multiple kernels.
+            // Also only run for Python — tree-sitter-python can't analyze other languages.
+            if language == sess.default_language && language == "python" {
                 let cells = shared.cell_sources.lock().await;
                 if !cells.is_empty() {
                     let mut ordered: Vec<_> = cells
@@ -991,13 +1114,30 @@ async fn forward_iopub(
         if is_introspect {
             if msg_type == "stream"
                 && let Some(text) = jmsg.content.get("text").and_then(|v| v.as_str())
+            {
+                let preview: String = text.chars().take(200).collect();
+                tracing::info!(
+                    "introspect stream from {language} (len={}): {}",
+                    text.len(),
+                    preview
+                );
+            }
+            if msg_type == "stream"
+                && let Some(text) = jmsg.content.get("text").and_then(|v| v.as_str())
                 && let Ok(vars) = serde_json::from_str::<serde_json::Value>(text)
             {
                 // Feed introspection results into the shared namespace
                 // so other kernels can access these variables
                 {
                     let mut ns = sess.shared_namespace.lock().await;
-                    let _ = ns.update_from_kernel(language, text);
+                    match ns.update_from_kernel(language, text) {
+                        Ok(()) => tracing::info!(
+                            "shared_namespace after {language} update: {} vars total [{}]",
+                            ns.vars.len(),
+                            ns.vars.keys().cloned().collect::<Vec<_>>().join(", ")
+                        ),
+                        Err(e) => tracing::warn!("update_from_kernel({language}) failed: {e}"),
+                    }
                 }
 
                 let mut tx = sess.ws_tx.lock().await;

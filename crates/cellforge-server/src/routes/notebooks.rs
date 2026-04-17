@@ -60,12 +60,26 @@ pub async fn create(
 ) -> Result<Json<NotebookEntry>, StatusCode> {
     let dir = user_notebook_dir(&state, &headers);
     let _ = std::fs::create_dir_all(&dir);
-    let name = req.name.unwrap_or("Untitled.ipynb".into());
-    let full = safe_resolve(&dir, &name)?;
-    if full.exists() {
-        return Err(StatusCode::CONFLICT);
-    }
 
+    // If user supplied a name, use it and 409 on conflict.
+    // If not, auto-increment: Untitled.ipynb → Untitled 1.ipynb → Untitled 2.ipynb …
+    let name = if let Some(n) = req.name {
+        let full = safe_resolve(&dir, &n)?;
+        if full.exists() {
+            return Err(StatusCode::CONFLICT);
+        }
+        n
+    } else {
+        let mut candidate = "Untitled.ipynb".to_string();
+        let mut i = 1;
+        while dir.join(&candidate).exists() {
+            candidate = format!("Untitled {i}.ipynb");
+            i += 1;
+        }
+        candidate
+    };
+
+    let full = safe_resolve(&dir, &name)?;
     let nb = Notebook::new_empty("python3", "Python 3", "python");
     io::write_notebook(&full, &nb).map_err(|e| {
         tracing::error!("creating {name}: {e}");
@@ -257,13 +271,36 @@ pub struct OpenPathReq {
     pub path: String,
 }
 
-pub async fn open_path(Json(req): Json<OpenPathReq>) -> Result<Json<Notebook>, StatusCode> {
-    let p = std::path::Path::new(&req.path);
-    if !p.exists() {
-        return Err(StatusCode::NOT_FOUND);
+/// POST /api/notebooks/open — open a notebook by path.
+///
+/// The submitted path MUST be relative to the authenticated user's workspace
+/// root. Absolute paths are rejected explicitly, and `safe_resolve` canonicalises
+/// the result and rejects anything that escapes the workspace (symlink traversal,
+/// `..`, etc). Previously this handler accepted arbitrary absolute paths, which
+/// allowed any authenticated request to read any file on the server
+/// (P0 arbitrary file read).
+pub async fn open_path(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<OpenPathReq>,
+) -> Result<Json<Notebook>, StatusCode> {
+    // Require auth — kernel/notebook access must be per-user.
+    if crate::routes::auth::extract_user(&headers).is_none() {
+        return Err(StatusCode::UNAUTHORIZED);
     }
-    io::read_notebook(p).map(Json).map_err(|e| {
+
+    // Reject absolute paths up front with a clearer error than safe_resolve's
+    // generic FORBIDDEN. The frontend should only send relative paths.
+    let submitted = std::path::Path::new(&req.path);
+    if submitted.is_absolute() || req.path.starts_with('/') || req.path.starts_with('\\') {
+        tracing::warn!("open_path rejected absolute path: {}", req.path);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let dir = user_notebook_dir(&state, &headers);
+    let full = safe_resolve(&dir, &req.path)?;
+    io::read_notebook(&full).map(Json).map_err(|e| {
         tracing::error!("open_path {}: {e}", req.path);
-        StatusCode::INTERNAL_SERVER_ERROR
+        StatusCode::NOT_FOUND
     })
 }

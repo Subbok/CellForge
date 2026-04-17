@@ -5,6 +5,7 @@
 import { useNotebookStore } from '../stores/notebookStore';
 import { uuid } from '../lib/uuid';
 import { broadcastCellOp, isActive as isCollabActive, clearCellText, unbindEditor } from './collaboration';
+import { ws } from './websocket';
 import type { CellType } from '../lib/types';
 
 export function addCellSynced(type: CellType, index?: number): string {
@@ -32,6 +33,9 @@ export function deleteCellSynced(id: string) {
     // so stale content doesn't come back on rejoin
     unbindEditor(id);
     clearCellText(id);
+    // tell the server to prune per-cell state (cell_sources used by reactive DAG)
+    // so long-running sessions don't leak one entry per deleted cell
+    ws.send('cell_deleted', { cell_id: id });
     if (isCollabActive()) {
       broadcastCellOp({ type: 'delete', cellId: id });
     }

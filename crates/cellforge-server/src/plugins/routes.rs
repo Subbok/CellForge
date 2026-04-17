@@ -56,7 +56,7 @@ pub async fn list_plugins(
 // ── admin config ──
 
 pub async fn get_config(State(state): State<Arc<AppState>>) -> Json<PluginSettings> {
-    Json(state.plugin_settings.read().unwrap().clone())
+    Json(state.plugin_settings.read().clone())
 }
 
 pub async fn set_config(
@@ -79,7 +79,7 @@ pub async fn set_config(
         tracing::error!("save plugin settings: {e}");
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
-    *state.plugin_settings.write().unwrap() = new_settings.clone();
+    *state.plugin_settings.write() = new_settings.clone();
     tracing::info!("plugin settings updated by admin '{caller}': {new_settings:?}");
     Ok(Json(new_settings))
 }
@@ -117,7 +117,7 @@ pub async fn upload_plugin(
         }
         _ => {
             // per-user: respect the admin toggle
-            let allow = state.plugin_settings.read().unwrap().allow_user_plugins;
+            let allow = state.plugin_settings.read().allow_user_plugins;
             if !allow && !is_admin {
                 return Err((
                     StatusCode::FORBIDDEN,

@@ -33,6 +33,9 @@ pub struct RunningKernel {
     /// (e.g. per-user plugin pylibs). Preserved so restart uses the same set.
     pub extra_pythonpath: Vec<std::path::PathBuf>,
     pub ref_count: Arc<AtomicUsize>,
+    /// Path to the kernel's Jupyter connection JSON in /tmp. Removed in `stop()`
+    /// so long-running servers don't accumulate these (each contains the HMAC key).
+    conn_file: std::path::PathBuf,
     child: Child,
 }
 
@@ -49,7 +52,8 @@ impl KernelManager {
         cwd: Option<&std::path::Path>,
         extra_pythonpath: &[std::path::PathBuf],
     ) -> Result<String> {
-        let (conn, child) = launcher::launch_kernel(spec_name, cwd, extra_pythonpath).await?;
+        let (conn, child, conn_file) =
+            launcher::launch_kernel(spec_name, cwd, extra_pythonpath).await?;
 
         let mut channels = crate::client::KernelClient::connect(&conn)
             .await
@@ -112,7 +116,14 @@ impl KernelManager {
                 conn,
                 cwd: cwd.map(|p| p.to_path_buf()),
                 extra_pythonpath: extra_pythonpath.to_vec(),
-                ref_count: Arc::new(AtomicUsize::new(0)),
+                // Initialize to 1 so the reaper (`cleanup_idle`) can't kill a
+                // freshly started kernel in the race window between
+                // `start()` returning and the first WS handler calling
+                // `fetch_add(1)` on subscribe. The creator "owns" this ref;
+                // the first subscriber takes it over (does NOT fetch_add),
+                // and releases it on disconnect via `fetch_sub(1)`.
+                ref_count: Arc::new(AtomicUsize::new(1)),
+                conn_file,
                 child,
             },
         );
@@ -128,20 +139,26 @@ impl KernelManager {
         self.kernels.get_mut(id)
     }
 
-    pub async fn cleanup_idle(&mut self) -> usize {
-        let mut to_stop = Vec::new();
+    /// Return IDs of kernels that look idle (refs=0, status=idle) without
+    /// stopping them. Lets the caller release the global KernelManager lock
+    /// before sequentially stopping each, so `cleanup_idle`-style reapers
+    /// don't block all other WS handlers for 2s per kernel during teardown.
+    pub fn idle_kernel_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
         for (id, kernel) in &self.kernels {
             let refs = kernel.ref_count.load(std::sync::atomic::Ordering::Relaxed);
-            if refs == 0 {
-                // check status
-                if let Ok(status) = kernel.shared.status.try_lock()
-                    && status.as_str() == "idle"
-                {
-                    to_stop.push(id.clone());
-                }
+            if refs == 0
+                && let Ok(status) = kernel.shared.status.try_lock()
+                && status.as_str() == "idle"
+            {
+                ids.push(id.clone());
             }
         }
+        ids
+    }
 
+    pub async fn cleanup_idle(&mut self) -> usize {
+        let to_stop = self.idle_kernel_ids();
         let count = to_stop.len();
         for id in to_stop {
             let _ = self.stop(&id).await;
@@ -165,6 +182,15 @@ impl KernelManager {
         if killed.is_err() {
             tracing::warn!("kernel {id} didn't exit gracefully, killing");
             let _ = kernel.child.kill().await;
+        }
+
+        // Delete the connection file — it contains the HMAC key and would
+        // otherwise linger in /tmp until reboot.
+        if let Err(e) = std::fs::remove_file(&kernel.conn_file) {
+            tracing::debug!(
+                "could not remove connection file {}: {e}",
+                kernel.conn_file.display()
+            );
         }
 
         Ok(())

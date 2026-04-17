@@ -23,6 +23,9 @@ pub const RESTART_KERNEL: &str = "restart_kernel";
 pub const COMPLETE_REQUEST: &str = "complete_request";
 pub const VARIABLE_DETAIL: &str = "variable_detail";
 pub const WIDGET_UPDATE: &str = "widget_update";
+/// Signals the server to prune state for a deleted cell (cell_sources,
+/// execution tracking). Payload: `{ "cell_id": "..." }`.
+pub const CELL_DELETED: &str = "cell_deleted";
 
 // server -> client
 pub const EXECUTE_RESULT: &str = "execute_result";

@@ -2,13 +2,57 @@
 //! The API key is sent from the frontend per-request (stored in localStorage,
 //! never persisted on our server). We just proxy to avoid CORS issues.
 
+use crate::routes::auth::extract_user;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// Hosts that the AI proxy is allowed to forward requests to. Prevents SSRF —
+/// an authenticated user could otherwise use the server as a proxy to hit
+/// arbitrary internal/external URLs. Localhost is included so Ollama works.
+const ALLOWED_AI_HOSTS: &[&str] = &[
+    "api.anthropic.com",
+    "api.openai.com",
+    "generativelanguage.googleapis.com",
+    "api.deepseek.com",
+    "api.groq.com",
+    "api.mistral.ai",
+    "openrouter.ai",
+    "localhost",
+    "127.0.0.1",
+];
+
+/// Extract just the host component from a URL string (no scheme, port, path).
+/// Returns None if the URL is malformed. Used for allowlist checking only —
+/// doesn't need to be a full RFC-3986 parser.
+fn parse_host(base_url: &str) -> Option<&str> {
+    // strip scheme
+    let rest = base_url
+        .split_once("://")
+        .map(|(_, r)| r)
+        .unwrap_or(base_url);
+    // strip userinfo
+    let rest = rest.split_once('@').map(|(_, r)| r).unwrap_or(rest);
+    // take up to first '/', '?', or '#'
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let hostport = &rest[..end];
+    // strip port
+    let host = hostport
+        .rsplit_once(':')
+        .map(|(h, _)| h)
+        .unwrap_or(hostport);
+    if host.is_empty() { None } else { Some(host) }
+}
+
+fn host_is_allowed(base_url: &str) -> bool {
+    match parse_host(base_url) {
+        Some(h) => ALLOWED_AI_HOSTS.contains(&h),
+        None => false,
+    }
+}
 
 #[derive(Deserialize)]
 pub struct AiChatReq {
@@ -35,17 +79,37 @@ pub struct AiChatRes {
 
 pub async fn chat(
     State(_state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<AiChatReq>,
-) -> impl IntoResponse {
+) -> Result<(StatusCode, Json<AiChatRes>), StatusCode> {
+    let _username = extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Validate base_url against allowlist (SSRF prevention). If base_url is not
+    // set, the hard-coded provider defaults in call_* are used and are safe.
+    if let Some(base_url) = req.base_url.as_deref()
+        && !base_url.is_empty()
+        && !host_is_allowed(base_url)
+    {
+        tracing::warn!("ai chat rejected base_url not in allowlist: {}", base_url);
+        return Ok((
+            StatusCode::BAD_REQUEST,
+            Json(AiChatRes {
+                ok: false,
+                content: None,
+                error: Some(format!("base_url host is not in the allowlist: {base_url}")),
+            }),
+        ));
+    }
+
     if req.api_key.is_empty() && req.provider != "ollama" {
-        return (
+        return Ok((
             StatusCode::BAD_REQUEST,
             Json(AiChatRes {
                 ok: false,
                 content: None,
                 error: Some("API key is required".into()),
             }),
-        );
+        ));
     }
 
     let model = req.model.as_deref().unwrap_or("default");
@@ -76,22 +140,22 @@ pub async fn chat(
     }
 
     match result {
-        Ok(content) => (
+        Ok(content) => Ok((
             StatusCode::OK,
             Json(AiChatRes {
                 ok: true,
                 content: Some(content),
                 error: None,
             }),
-        ),
-        Err(e) => (
+        )),
+        Err(e) => Ok((
             StatusCode::OK,
             Json(AiChatRes {
                 ok: false,
                 content: None,
                 error: Some(e),
             }),
-        ),
+        )),
     }
 }
 

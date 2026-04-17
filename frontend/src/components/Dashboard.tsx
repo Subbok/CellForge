@@ -46,6 +46,18 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
   useEffect(() => { loadFiles(); }, [loadFiles]);
   useEffect(() => { api.sharedFiles().then(setSharedFiles).catch(() => {}); }, []);
 
+  // Prune selection when files list changes — drop paths no longer present
+  // (e.g. after delete, rename, or navigating to another folder)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelected(prev => {
+      const existing = new Set(files.map(f => f.path));
+      const next = new Set<string>();
+      for (const p of prev) if (existing.has(p)) next.add(p);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [files]);
+
   function navigateUp() {
     const parts = cwd.split('/').filter(Boolean);
     parts.pop();

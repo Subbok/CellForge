@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
+use parking_lot::Mutex;
 use rusqlite::Connection;
 use serde::Serialize;
-use std::sync::Mutex;
 
 pub struct UserDb {
     conn: Mutex<Connection>,
@@ -152,16 +152,18 @@ impl UserDb {
         if username.is_empty() || username.len() < 2 {
             bail!("username must be at least 2 characters");
         }
-        if password.len() < 4 {
-            bail!("password must be at least 4 characters");
+        if password.len() < 8 {
+            bail!("password must be at least 8 characters");
         }
 
-        let is_admin = !self.has_users(); // first user = admin
-        let hash = bcrypt::hash(password, 10).context("hashing password")?;
+        // Compute bcrypt hash BEFORE taking the DB lock — hashing is
+        // 100-300ms of pure CPU and should not block other DB readers/writers.
+        let hash = bcrypt::hash(password, 12).context("hashing password")?;
         let workspace = cellforge_config::user_workspace_dir(&username);
         std::fs::create_dir_all(&workspace)?;
 
-        let conn = self.conn.lock().unwrap();
+        let is_admin = !self.has_users(); // first user = admin
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO users (username, password_hash, display_name, workspace_dir, is_admin) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![username, hash, display_name, workspace.to_string_lossy().to_string(), is_admin as i32],
@@ -186,7 +188,7 @@ impl UserDb {
 
     pub fn login(&self, username: &str, password: &str) -> Result<User> {
         let username = username.trim().to_lowercase();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
 
         let mut stmt = conn.prepare(
             "SELECT id, username, password_hash, display_name, workspace_dir, is_admin, created_at FROM users WHERE username = ?1"
@@ -224,11 +226,13 @@ impl UserDb {
 
     /// Change a user's password. Caller must verify authorization (self or admin).
     pub fn change_password(&self, username: &str, new_password: &str) -> Result<()> {
-        if new_password.len() < 4 {
-            bail!("password must be at least 4 characters");
+        if new_password.len() < 8 {
+            bail!("password must be at least 8 characters");
         }
-        let hash = bcrypt::hash(new_password, 10).context("hashing password")?;
-        let conn = self.conn.lock().unwrap();
+        // Compute bcrypt hash BEFORE taking the DB lock — hashing is
+        // 100-300ms of pure CPU and should not block other DB readers/writers.
+        let hash = bcrypt::hash(new_password, 12).context("hashing password")?;
+        let conn = self.conn.lock();
         let rows = conn.execute(
             "UPDATE users SET password_hash = ?1 WHERE username = ?2",
             rusqlite::params![hash, username.trim().to_lowercase()],
@@ -240,7 +244,7 @@ impl UserDb {
     }
 
     pub fn get_user(&self, username: &str) -> Result<User> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, username, display_name, workspace_dir, is_admin, created_at FROM users WHERE username = ?1"
         )?;
@@ -259,7 +263,7 @@ impl UserDb {
     }
 
     pub fn list_users(&self) -> Vec<User> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, username, display_name, workspace_dir, is_admin, created_at FROM users ORDER BY id"
         ).unwrap();
@@ -280,7 +284,7 @@ impl UserDb {
     }
 
     pub fn delete_user(&self, username: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM users WHERE username = ?1 AND is_admin = 0",
             rusqlite::params![username],
@@ -289,7 +293,7 @@ impl UserDb {
     }
 
     pub fn has_users(&self) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
             .unwrap_or(0);
@@ -307,7 +311,7 @@ impl UserDb {
         snapshot: &str,
         changed_cells: &str,
     ) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO file_history (file_path, username, action, snapshot, changed_cells) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![file_path, username, action, snapshot, changed_cells],
@@ -317,7 +321,7 @@ impl UserDb {
 
     /// Get the most recent snapshot for a file (to compute diffs).
     pub fn last_snapshot(&self, file_path: &str) -> Option<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT snapshot FROM file_history WHERE file_path = ?1 ORDER BY id DESC LIMIT 1",
             rusqlite::params![file_path],
@@ -327,7 +331,7 @@ impl UserDb {
     }
 
     pub fn get_history(&self, file_path: &str, limit: usize) -> Vec<HistoryEntry> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, username, action, changed_cells, created_at FROM file_history WHERE file_path = ?1 ORDER BY id DESC LIMIT ?2"
         ).unwrap();
@@ -346,7 +350,7 @@ impl UserDb {
     }
 
     pub fn get_snapshot(&self, id: i64) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT snapshot FROM file_history WHERE id = ?1",
             rusqlite::params![id],
@@ -374,7 +378,7 @@ impl UserDb {
         #[cfg(not(unix))]
         std::fs::copy(&src_abs, &dest).context("copying shared file")?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO shared_files (from_user, to_user, file_name, file_path) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![from, to, file_name, dest.to_string_lossy().to_string()],
@@ -384,7 +388,7 @@ impl UserDb {
 
     /// List files shared with a user.
     pub fn shared_with(&self, username: &str) -> Vec<SharedFile> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, from_user, file_name, shared_at FROM shared_files WHERE to_user = ?1 ORDER BY shared_at DESC"
         ).unwrap();
@@ -403,7 +407,7 @@ impl UserDb {
 
     /// Remove a share (delete symlink + DB record).
     pub fn unshare_file(&self, share_id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         // get file_path to remove symlink
         let path: Option<String> = conn
             .query_row(
@@ -432,7 +436,7 @@ impl UserDb {
     ) {
         // Collect data in one lock, then release before calling get_user (avoids deadlock)
         let rows: Vec<(i64, String, String)> = {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.conn.lock();
             let mut stmt = conn
                 .prepare("SELECT id, to_user, file_path FROM shared_files WHERE from_user = ?1 AND file_name = ?2")
                 .unwrap();
@@ -456,7 +460,7 @@ impl UserDb {
                 #[cfg(not(unix))]
                 let _ = std::fs::copy(&new_src_abs, &new_dest);
                 // update DB with new lock
-                let conn = self.conn.lock().unwrap();
+                let conn = self.conn.lock();
                 let _ = conn.execute(
                     "UPDATE shared_files SET file_name = ?1, file_path = ?2 WHERE id = ?3",
                     rusqlite::params![new_name, new_dest.to_string_lossy().to_string(), id],
@@ -474,7 +478,7 @@ impl UserDb {
         max_kernels: i64,
         max_memory_mb: i64,
     ) -> Result<Group> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO groups (name, description, max_kernels_per_user, max_memory_mb_per_user) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![name, description, max_kernels, max_memory_mb],
@@ -491,7 +495,7 @@ impl UserDb {
     }
 
     pub fn list_groups(&self) -> Vec<Group> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn
             .prepare("SELECT id, name, description, max_kernels_per_user, max_memory_mb_per_user, created_at FROM groups ORDER BY name")
             .unwrap();
@@ -517,7 +521,7 @@ impl UserDb {
         max_kernels: i64,
         max_memory_mb: i64,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let rows = conn.execute(
             "UPDATE groups SET description = ?1, max_kernels_per_user = ?2, max_memory_mb_per_user = ?3 WHERE name = ?4",
             rusqlite::params![description, max_kernels, max_memory_mb, name],
@@ -529,7 +533,7 @@ impl UserDb {
     }
 
     pub fn delete_group(&self, name: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         // clear group_name on users that belong to this group
         conn.execute(
             "UPDATE users SET group_name = '' WHERE group_name = ?1",
@@ -551,7 +555,7 @@ impl UserDb {
         max_memory_mb: i64,
         group_name: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let rows = conn.execute(
             "UPDATE users SET max_kernels = ?1, max_memory_mb = ?2, group_name = ?3 WHERE username = ?4",
             rusqlite::params![max_kernels, max_memory_mb, group_name, username],
@@ -565,7 +569,7 @@ impl UserDb {
     /// Return effective limits for a user. Per-user overrides take priority;
     /// if both are 0 the group defaults are used instead.
     pub fn get_user_limits(&self, username: &str) -> Result<UserLimits> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let (max_kernels, max_memory_mb, group_name): (i64, i64, String) = conn
             .query_row(
                 "SELECT max_kernels, max_memory_mb, group_name FROM users WHERE username = ?1",
@@ -606,7 +610,7 @@ impl UserDb {
     }
 
     pub fn touch_user_active(&self, username: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE users SET last_active = CURRENT_TIMESTAMP, is_active = 1 WHERE username = ?1",
             rusqlite::params![username],
@@ -615,7 +619,7 @@ impl UserDb {
     }
 
     pub fn user_is_active(&self, username: &str) -> bool {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT is_active FROM users WHERE username = ?1",
             rusqlite::params![username],
@@ -635,7 +639,7 @@ impl UserDb {
         language: &str,
         notebook_path: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT OR REPLACE INTO kernel_sessions (id, username, kernel_spec, language, notebook_path) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![id, username, kernel_spec, language, notebook_path],
@@ -644,7 +648,7 @@ impl UserDb {
     }
 
     pub fn remove_kernel_session(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM kernel_sessions WHERE id = ?1",
             rusqlite::params![id],
@@ -653,7 +657,7 @@ impl UserDb {
     }
 
     pub fn update_kernel_session_status(&self, id: &str, status: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE kernel_sessions SET status = ?1, last_active = CURRENT_TIMESTAMP WHERE id = ?2",
             rusqlite::params![status, id],
@@ -662,7 +666,7 @@ impl UserDb {
     }
 
     pub fn list_kernel_sessions(&self) -> Vec<KernelSession> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
                 "SELECT id, username, kernel_spec, language, notebook_path, started_at, last_active, memory_mb, status FROM kernel_sessions ORDER BY started_at DESC",
@@ -687,7 +691,7 @@ impl UserDb {
     }
 
     pub fn kernel_count_for_user(&self, username: &str) -> i64 {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT COUNT(*) FROM kernel_sessions WHERE username = ?1 AND status = 'running'",
             rusqlite::params![username],
@@ -700,7 +704,7 @@ impl UserDb {
 
     /// Return recently saved .ipynb files for a user from file_history.
     pub fn recent_notebooks(&self, username: &str, limit: usize) -> Vec<RecentNotebook> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
                 "SELECT file_path, MAX(created_at) as last_opened \

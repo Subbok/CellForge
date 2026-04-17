@@ -1,12 +1,42 @@
 use axum::Json;
 use axum::extract::State;
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use cellforge_auth::jwt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::state::AppState;
+
+/// Detect whether the request came in over HTTPS. Prefers `X-Forwarded-Proto`
+/// (set by reverse proxies like nginx / Cloudflare / Traefik). When absent,
+/// assumes the connection is plain HTTP — safer to skip `Secure` than to set
+/// it and have browsers drop the cookie on a dev localhost setup.
+fn is_secure_request(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.eq_ignore_ascii_case("https"))
+        .unwrap_or(false)
+}
+
+fn auth_cookie(token: &str, headers: &HeaderMap) -> String {
+    let secure = if is_secure_request(headers) {
+        "; Secure"
+    } else {
+        ""
+    };
+    format!("cellforge_token={token}; Path=/; HttpOnly; SameSite=Strict{secure}; Max-Age=604800")
+}
+
+fn logout_cookie(headers: &HeaderMap) -> String {
+    let secure = if is_secure_request(headers) {
+        "; Secure"
+    } else {
+        ""
+    };
+    format!("cellforge_token=; Path=/; HttpOnly; SameSite=Strict{secure}; Max-Age=0")
+}
 
 #[derive(Deserialize)]
 pub struct LoginReq {
@@ -32,13 +62,13 @@ pub struct AuthResponse {
 
 pub async fn login(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<LoginReq>,
 ) -> impl IntoResponse {
     match state.users.login(&req.username, &req.password) {
         Ok(user) => {
             let token = jwt::create_token(&user.username).unwrap_or_default();
-            let cookie =
-                format!("cellforge_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
+            let cookie = auth_cookie(&token, &headers);
 
             (
                 StatusCode::OK,
@@ -108,9 +138,7 @@ pub async fn register(
             if is_first {
                 // first user = self-registration, log them in
                 let token = jwt::create_token(&user.username).unwrap_or_default();
-                let cookie = format!(
-                    "cellforge_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800"
-                );
+                let cookie = auth_cookie(&token, &headers);
                 return (
                     StatusCode::OK,
                     [(header::SET_COOKIE, cookie)],
@@ -177,11 +205,11 @@ pub async fn me(
     }
 }
 
-pub async fn logout() -> impl IntoResponse {
-    let cookie = "cellforge_token=; Path=/; HttpOnly; Max-Age=0";
+pub async fn logout(headers: HeaderMap) -> impl IntoResponse {
+    let cookie = logout_cookie(&headers);
     (
         StatusCode::OK,
-        [(header::SET_COOKIE, cookie.to_string())],
+        [(header::SET_COOKIE, cookie)],
         Json(AuthResponse {
             ok: true,
             error: None,

@@ -10,6 +10,16 @@ const pausedCode = new Map<string, string>();
 // stores current line number in original code (1-indexed)
 const pausedAt = new Map<string, number>();
 
+/// Resolve the language for a cell: metadata override → current kernel's language → "python".
+function cellLanguage(cellId: string): string {
+  const cell = useNotebookStore.getState().cells.find(c => c.id === cellId);
+  const metaLang = cell?.metadata?.language as string | undefined;
+  if (metaLang) return metaLang.toLowerCase();
+  const ks = useKernelStore.getState();
+  const specLang = ks.availableSpecs.find(sp => sp.name === ks.spec)?.language;
+  return (specLang ?? 'python').toLowerCase();
+}
+
 export function useExecuteCell() {
   const clearOutputs = useNotebookStore(s => s.clearOutputs);
   const setCellStatus = useNotebookStore(s => s.setCellStatus);
@@ -20,6 +30,7 @@ export function useExecuteCell() {
 
     const cells = useNotebookStore.getState().cells;
     const idx = cells.findIndex(c => c.id === cellId);
+    const language = cellLanguage(cellId);
 
     // check for breakpoints
     const [before, after] = bp.splitAtBreakpoint(cellId, code);
@@ -34,6 +45,7 @@ export function useExecuteCell() {
         cell_id: cellId,
         cell_index: idx,
         code: before,
+        language,
       });
       trackExecution(msgId, cellId);
 
@@ -59,6 +71,7 @@ export function useExecuteCell() {
         cell_id: cellId,
         cell_index: idx,
         code,
+        language,
       });
       trackExecution(msgId, cellId);
     }
@@ -106,6 +119,7 @@ export function stepExecution(cellId: string) {
     cell_id: cellId,
     cell_index: idx,
     code: firstLine,
+    language: cellLanguage(cellId),
   });
   trackExecution(msgId, cellId);
   // onExecuteReply will set paused if pausedCode still has content
@@ -129,6 +143,7 @@ export function continueExecution(cellId: string) {
     cell_id: cellId,
     cell_index: idx,
     code: remaining,
+    language: cellLanguage(cellId),
   });
   trackExecution(msgId, cellId);
 }

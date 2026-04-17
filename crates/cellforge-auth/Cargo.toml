@@ -8,9 +8,12 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 rusqlite = { version = "0.39", features = ["bundled"] }
 bcrypt = "0.19"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 cellforge-config = { path = "../cellforge-config" }
+getrandom = "0.2"
+parking_lot = "0.12"

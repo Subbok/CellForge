@@ -86,13 +86,17 @@ pub struct SharedNamespace {
 }
 
 /// Helper struct matching the JSON objects we expect from kernel introspection.
+/// `value_json` and `size_bytes` are optional — variables without a JSON-serialised
+/// value cannot be shared across kernels, but still count towards the namespace.
 #[derive(Deserialize)]
 struct IntrospectionVar {
     name: String,
     #[serde(rename = "type")]
     var_type: String,
-    value_json: String,
-    size_bytes: usize,
+    #[serde(default)]
+    value_json: Option<String>,
+    #[serde(default)]
+    size_bytes: Option<usize>,
 }
 
 impl SharedNamespace {
@@ -106,14 +110,26 @@ impl SharedNamespace {
     /// Update the namespace with the latest variable snapshot from a kernel.
     ///
     /// `language` identifies the source kernel (e.g. `"python"`, `"r"`, `"julia"`).
-    /// `vars_json` is expected to be a JSON array of objects with fields:
-    /// `name`, `type`, `value_json`, `size_bytes`.
+    /// `vars_json` may be either:
+    /// - a JSON **array** of objects: `[{"name": ..., "type": ...}, ...]`, or
+    /// - a JSON **object** keyed by name: `{"x": {"name": "x", "type": "int", ...}, ...}`
+    ///   (this is what the introspection scripts actually emit).
     ///
-    /// Old variables originating from `language` are removed first, then new
-    /// ones are inserted — provided they are transferable and under
-    /// [`MAX_SHARE_SIZE`].
+    /// Variables without `value_json` are skipped — they can't be injected
+    /// into a different kernel. Variables over [`MAX_SHARE_SIZE`] are skipped too.
+    ///
+    /// Old variables originating from `language` are removed first.
     pub fn update_from_kernel(&mut self, language: &str, vars_json: &str) -> anyhow::Result<()> {
-        let incoming: Vec<IntrospectionVar> = serde_json::from_str(vars_json)?;
+        // Try array first (legacy format), then fall back to object-keyed-by-name.
+        let parsed: serde_json::Value = serde_json::from_str(vars_json)?;
+        let incoming: Vec<IntrospectionVar> = match parsed {
+            serde_json::Value::Array(_) => serde_json::from_value(parsed)?,
+            serde_json::Value::Object(map) => map
+                .into_values()
+                .filter_map(|v| serde_json::from_value::<IntrospectionVar>(v).ok())
+                .collect(),
+            _ => anyhow::bail!("expected array or object for vars_json"),
+        };
 
         // Remove all existing vars that came from this language.
         self.vars.retain(|_, v| v.language != language);
@@ -122,7 +138,11 @@ impl SharedNamespace {
             if !is_transferable(&v.var_type) {
                 continue;
             }
-            if v.size_bytes > MAX_SHARE_SIZE {
+            let Some(value_json) = v.value_json else {
+                continue; // introspection didn't produce a serialisable value
+            };
+            let size_bytes = v.size_bytes.unwrap_or(value_json.len());
+            if size_bytes > MAX_SHARE_SIZE {
                 continue;
             }
             self.vars.insert(
@@ -131,8 +151,8 @@ impl SharedNamespace {
                     name: v.name,
                     var_type: v.var_type,
                     language: language.to_string(),
-                    value_json: v.value_json,
-                    size_bytes: v.size_bytes,
+                    value_json,
+                    size_bytes,
                 },
             );
         }
@@ -142,25 +162,17 @@ impl SharedNamespace {
 
     /// Generate assignment code that would recreate `var` in `target_lang`.
     ///
-    /// Returns `None` if the target language is unsupported.
+    /// Returns `None` if the target language is unsupported OR if `var`'s value
+    /// can't be safely transliterated (e.g. a dict going into R, or a nested
+    /// list into Julia). We prefer to skip rather than inject invalid syntax
+    /// that would wedge the target kernel.
     pub fn inject_code(var: &SharedVariable, target_lang: &str) -> Option<String> {
         let value = &var.value_json;
+        let parsed: serde_json::Value = serde_json::from_str(value).ok()?;
         match target_lang {
-            "python" => Some(format!("{} = {}", var.name, value)),
-            "r" => {
-                let converted = value
-                    .replace("True", "TRUE")
-                    .replace("False", "FALSE")
-                    .replace("None", "NULL");
-                Some(format!("{} <- {}", var.name, converted))
-            }
-            "julia" => {
-                let converted = value
-                    .replace("True", "true")
-                    .replace("False", "false")
-                    .replace("None", "nothing");
-                Some(format!("{} = {}", var.name, converted))
-            }
+            "python" => to_python_literal(&parsed).map(|v| format!("{} = {}", var.name, v)),
+            "r" => to_r_literal(&parsed).map(|v| format!("{} <- {}", var.name, v)),
+            "julia" => to_julia_literal(&parsed).map(|v| format!("{} = {}", var.name, v)),
             _ => None,
         }
     }
@@ -185,6 +197,96 @@ impl SharedNamespace {
 impl Default for SharedNamespace {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Serialise a parsed JSON value as a Python literal.
+/// JSON `true`/`false`/`null` become Python `True`/`False`/`None`.
+fn to_python_literal(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Null => Some("None".into()),
+        serde_json::Value::Bool(b) => Some(if *b { "True".into() } else { "False".into() }),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::String(s) => Some(format!(
+            "\"{}\"",
+            s.replace('\\', "\\\\").replace('"', "\\\"")
+        )),
+        serde_json::Value::Array(arr) => {
+            let parts: Vec<String> = arr.iter().filter_map(to_python_literal).collect();
+            if parts.len() != arr.len() {
+                return None;
+            }
+            Some(format!("[{}]", parts.join(", ")))
+        }
+        serde_json::Value::Object(map) => {
+            let mut parts = Vec::with_capacity(map.len());
+            for (k, val) in map {
+                let v = to_python_literal(val)?;
+                parts.push(format!(
+                    "\"{}\": {}",
+                    k.replace('\\', "\\\\").replace('"', "\\\""),
+                    v
+                ));
+            }
+            Some(format!("{{{}}}", parts.join(", ")))
+        }
+    }
+}
+
+/// Serialise a parsed JSON value as an R literal.
+/// Returns `None` for shapes that can't be safely represented (objects / nested arrays).
+fn to_r_literal(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Null => Some("NULL".into()),
+        serde_json::Value::Bool(b) => Some(if *b { "TRUE".into() } else { "FALSE".into() }),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::String(s) => Some(format!(
+            "\"{}\"",
+            s.replace('\\', "\\\\").replace('"', "\\\"")
+        )),
+        serde_json::Value::Array(arr) => {
+            // Only uniform vectors of primitives — R's c() can't mix types cleanly
+            // and nested arrays aren't vectors either.
+            let mut parts = Vec::with_capacity(arr.len());
+            for item in arr {
+                match item {
+                    serde_json::Value::Null
+                    | serde_json::Value::Bool(_)
+                    | serde_json::Value::Number(_)
+                    | serde_json::Value::String(_) => parts.push(to_r_literal(item)?),
+                    _ => return None,
+                }
+            }
+            Some(format!("c({})", parts.join(", ")))
+        }
+        serde_json::Value::Object(_) => None, // no clean R equivalent for arbitrary dicts
+    }
+}
+
+/// Serialise a parsed JSON value as a Julia literal.
+fn to_julia_literal(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Null => Some("nothing".into()),
+        serde_json::Value::Bool(b) => Some(if *b { "true".into() } else { "false".into() }),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::String(s) => Some(format!(
+            "\"{}\"",
+            s.replace('\\', "\\\\").replace('"', "\\\"")
+        )),
+        serde_json::Value::Array(arr) => {
+            let mut parts = Vec::with_capacity(arr.len());
+            for item in arr {
+                match item {
+                    serde_json::Value::Null
+                    | serde_json::Value::Bool(_)
+                    | serde_json::Value::Number(_)
+                    | serde_json::Value::String(_) => parts.push(to_julia_literal(item)?),
+                    _ => return None,
+                }
+            }
+            Some(format!("[{}]", parts.join(", ")))
+        }
+        serde_json::Value::Object(_) => None,
     }
 }
 
@@ -230,16 +332,42 @@ mod tests {
     }
 
     #[test]
+    fn inject_code_python_bool_to_pythonic() {
+        let var = SharedVariable {
+            name: "flag".to_string(),
+            var_type: "bool".to_string(),
+            language: "r".to_string(),
+            value_json: "true".to_string(),
+            size_bytes: 4,
+        };
+        let code = SharedNamespace::inject_code(&var, "python").unwrap();
+        assert_eq!(code, "flag = True");
+    }
+
+    #[test]
     fn inject_code_r() {
         let var = SharedVariable {
             name: "flag".to_string(),
             var_type: "bool".to_string(),
             language: "python".to_string(),
-            value_json: "True".to_string(),
+            value_json: "true".to_string(),
             size_bytes: 4,
         };
         let code = SharedNamespace::inject_code(&var, "r").unwrap();
         assert_eq!(code, "flag <- TRUE");
+    }
+
+    #[test]
+    fn inject_code_r_vector() {
+        let var = SharedVariable {
+            name: "nums".to_string(),
+            var_type: "list".to_string(),
+            language: "python".to_string(),
+            value_json: "[1, 2, 3]".to_string(),
+            size_bytes: 9,
+        };
+        let code = SharedNamespace::inject_code(&var, "r").unwrap();
+        assert_eq!(code, "nums <- c(1, 2, 3)");
     }
 
     #[test]
@@ -248,11 +376,25 @@ mod tests {
             name: "val".to_string(),
             var_type: "NoneType".to_string(),
             language: "python".to_string(),
-            value_json: "None".to_string(),
+            value_json: "null".to_string(),
             size_bytes: 4,
         };
         let code = SharedNamespace::inject_code(&var, "julia").unwrap();
         assert_eq!(code, "val = nothing");
+    }
+
+    #[test]
+    fn inject_code_r_skips_objects() {
+        let var = SharedVariable {
+            name: "d".to_string(),
+            var_type: "dict".to_string(),
+            language: "python".to_string(),
+            value_json: r#"{"a": 1}"#.to_string(),
+            size_bytes: 8,
+        };
+        // Objects have no clean R equivalent → skip injection rather than
+        // produce invalid syntax that would wedge the kernel.
+        assert!(SharedNamespace::inject_code(&var, "r").is_none());
     }
 
     #[test]
