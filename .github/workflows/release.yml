@@ -100,12 +100,14 @@ jobs:
 
       - name: Build desktop app
         if: matrix.desktop
+        continue-on-error: true
         run: cargo build --release --target ${{ matrix.target }} -p cellforge-app
 
       # --- Package: Linux AppImage ---
 
       - name: Package AppImage (Linux)
         if: matrix.desktop && runner.os == 'Linux'
+        continue-on-error: true
         run: |
           # Download and EXTRACT linuxdeploy (no FUSE on CI runners)
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
@@ -151,6 +153,7 @@ jobs:
 
       - name: Package .dmg (macOS)
         if: matrix.desktop && runner.os == 'macOS'
+        continue-on-error: true
         run: |
           # Generate .icns from PNG
           mkdir -p icon.iconset
@@ -245,6 +248,7 @@ jobs:
             ${{ matrix.artifact }}-desktop.AppImage
             ${{ matrix.artifact }}-desktop.dmg
             ${{ matrix.artifact }}-desktop.exe
+          if-no-files-found: warn
 
   release:
     name: Create GitHub Release

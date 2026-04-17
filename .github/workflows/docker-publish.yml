@@ -14,9 +14,10 @@ on:
   # Automatyczny tygodniowy rebuild (base image CVE fixes)
   schedule:
     - cron: '0 3 * * 0'  # niedziela 3:00 UTC
-  # Przy zmianie Dockerfile lub workflow
+  # Przy zmianie Dockerfile lub workflow + przy nowym tagu v*
   push:
     branches: [main]
+    tags: ['v*']
     paths:
       - 'Dockerfile.server'
       - '.github/workflows/docker-publish.yml'
