@@ -1,14 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { useVariableStore, type DataFramePreview } from '../../stores/variableStore';
-import { useKernelStore } from '../../stores/kernelStore';
 import { ws } from '../../services/websocket';
+import { langColor } from '../../lib/languages';
 import { Table } from 'lucide-react';
-
-const LANG_BADGE_COLORS: Record<string, string> = {
-  python: '#7aa2f7',
-  r: '#2d7dca',
-  julia: '#9558b2',
-};
 
 function typeColor(t: string) {
   // Python types
@@ -47,13 +41,16 @@ const PREVIEWABLE = new Set([
 export function VariableExplorer() {
   const { t } = useTranslation();
   const vars = useVariableStore(s => s.vars);
+  const byLang = useVariableStore(s => s.byLang);
   const selected = useVariableStore(s => s.selected);
   const select = useVariableStore(s => s.select);
   const preview = useVariableStore(s => s.preview);
   const previewLoading = useVariableStore(s => s.previewLoading);
-  const activeKernelCount = useKernelStore(s =>
-    new Set(s.availableSpecs.map(sp => sp.language.toLowerCase())).size
-  );
+  // Show language badges only when multiple languages currently have variables —
+  // no point badging everything when only one kernel has run.
+  const activeKernelCount = Object.keys(byLang).filter(
+    l => Object.keys(byLang[l]).length > 0
+  ).length;
 
   const list = Object.values(vars);
 
@@ -92,8 +89,8 @@ export function VariableExplorer() {
                     <span
                       className="text-[9px] px-1 py-0.5 rounded ml-1 inline-block"
                       style={{
-                        backgroundColor: `${LANG_BADGE_COLORS[v.language] ?? '#7aa2f7'}15`,
-                        color: LANG_BADGE_COLORS[v.language] ?? '#7aa2f7',
+                        backgroundColor: `${langColor(v.language)}15`,
+                        color: langColor(v.language),
                       }}
                     >
                       {v.language}

@@ -139,15 +139,17 @@ export function CodeCell({ cell, index }: { cell: Cell; index: number }) {
       const alt = e.altKey;
       const enter = e.keyCode === 3;
 
-      // Ctrl+Shift+I — format code
+      // Ctrl+Shift+I — format code (Python only; black/autopep8 doesn't exist for other langs)
       if (ctrl && shift && e.keyCode === 39 /* KeyI */) {
         e.preventDefault();
         e.stopPropagation();
-        formatPythonCode(sourceRef.current).then(result => {
-          if (result && result !== sourceRef.current) {
-            useNotebookStore.getState().updateSource(cellIdRef.current, result);
-          }
-        });
+        if (monacoLang === 'python') {
+          formatPythonCode(sourceRef.current).then(result => {
+            if (result && result !== sourceRef.current) {
+              useNotebookStore.getState().updateSource(cellIdRef.current, result);
+            }
+          });
+        }
         return;
       }
 

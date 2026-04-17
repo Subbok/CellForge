@@ -39,6 +39,7 @@ const LANGUAGES: Record<string, LanguageConfig> = {
   ocaml:      { color: '#3be133', monacoId: 'plaintext',    label: 'OCaml' },
   wolfram:    { color: '#DD1100', monacoId: 'plaintext',    label: 'Wolfram' },
   matlab:     { color: '#E16737', monacoId: 'plaintext',    label: 'MATLAB' },
+  octave:     { color: '#0790C0', monacoId: 'plaintext',    label: 'Octave' },
   bash:       { color: '#89E051', monacoId: 'shell',        label: 'Bash' },
 };
 

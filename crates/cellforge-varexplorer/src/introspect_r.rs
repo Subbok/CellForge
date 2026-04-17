@@ -43,6 +43,17 @@ local({
             repr = rp,
             module = mod
         )
+        # value_json / size_bytes for cross-kernel sharing — only for
+        # simple transferable types (scalars and short vectors of primitives)
+        if (cls %in% c("numeric", "integer", "double", "character", "logical") &&
+            length(v) <= 1000 &&
+            requireNamespace("jsonlite", quietly = TRUE)) {
+            vj <- tryCatch(jsonlite::toJSON(v, auto_unbox = length(v) == 1), error = function(e) NULL)
+            if (!is.null(vj)) {
+                info$value_json <- as.character(vj)
+                info$size_bytes <- nchar(info$value_json)
+            }
+        }
         result[[n]] <- info
     }
     if (requireNamespace("jsonlite", quietly = TRUE)) {

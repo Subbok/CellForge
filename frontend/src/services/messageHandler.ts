@@ -36,7 +36,7 @@ export function setupMessageHandlers() {
     kernel.getState().setStatus(state as KernelStatus);
     // When kernel restarts, clear variables for all clients
     if (state === 'starting' || state === 'restarting') {
-      useVariableStore.getState().setVars({});
+      useVariableStore.getState().clearAll();
     }
   });
 
@@ -180,7 +180,8 @@ export function setupMessageHandlers() {
 
   ws.on('variables_update', (msg) => {
     const vars = msg.payload?.variables as Record<string, VariableInfo> | undefined;
-    if (vars) useVariableStore.getState().setVars(vars);
+    const lang = (msg.payload?.language as string | undefined) ?? 'python';
+    if (vars) useVariableStore.getState().setVarsForLanguage(lang, vars);
   });
 
   ws.on('variable_detail', (msg) => {

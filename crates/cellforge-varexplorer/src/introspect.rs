@@ -40,6 +40,13 @@ for __cf_n, __cf_v in list(globals().items()):
         if hasattr(__cf_v, '__len__') and not isinstance(__cf_v, str):
             __cf_info['size'] = len(__cf_v)
         __cf_info['repr'] = repr(__cf_v)[:500]
+        # value_json / size_bytes for cross-kernel sharing (only for JSON-safe types)
+        if __cf_t in ('int', 'float', 'str', 'bool', 'NoneType', 'list', 'dict'):
+            try:
+                __cf_info['value_json'] = __cf_json.dumps(__cf_v)
+                __cf_info['size_bytes'] = len(__cf_info['value_json'])
+            except Exception:
+                pass
     except Exception:
         __cf_info['repr'] = '<error>'
 

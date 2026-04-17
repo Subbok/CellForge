@@ -105,7 +105,7 @@ export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
         <Btn title="Clear all outputs" onClick={clearAllOutputs}><Eraser size={16} /></Btn>
         <Btn title="Restart kernel" onClick={() => {
           useKernelStore.getState().setStatus('restarting');
-          useVariableStore.getState().setVars({});
+          useVariableStore.getState().clearAll();
           clearQueue();
           ws.reconnect(spec ?? 'python3', useNotebookStore.getState().filePath ?? undefined);
         }}><RotateCcw size={16} /></Btn>
