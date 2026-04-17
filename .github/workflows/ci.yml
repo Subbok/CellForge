@@ -89,8 +89,11 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Run cargo audit
-        # Don't fail on warnings (unmaintained upstream crates we can't fix)
-        run: cargo audit
+        # Ignore RUSTSEC-2023-0071: rsa Marvin Attack.
+        # Transitive through jsonwebtoken's RSA support, which we don't use
+        # (CellForge uses HS256 symmetric JWT).
+        # Upstream has no fix available as of 2026-04.
+        run: cargo audit --ignore RUSTSEC-2023-0071
 
       - name: Setup Node
         uses: actions/setup-node@v5
