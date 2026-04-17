@@ -19,7 +19,16 @@
 curl -fsSL https://github.com/Subbok/CellForge/releases/latest/download/cellforge-linux-x64 -o cellforge && chmod +x cellforge && ./cellforge
 ```
 
-**Docker (with kernel chooser):**
+**Docker (pre-built, recommended):**
+
+```bash
+docker run --gpus all -p 8888:8888 -v ~/notebooks:/data \
+  ghcr.io/subbok/cellforge-server:latest
+```
+
+Includes Python 3.12, PyTorch + CUDA 12.6, and the full ML stack. Drop `--gpus all` for CPU-only.
+
+**Docker (custom kernels):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Subbok/CellForge/main/scripts/docker-install.sh | bash

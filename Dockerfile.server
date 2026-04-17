@@ -1,0 +1,51 @@
+# CellForge — production server with Python 3.12 (PyTorch + CUDA)
+# Build: docker build -f Dockerfile.server -t cellforge-server .
+# Run:   docker run --gpus all -p 8888:8888 -v ~/notebooks:/data cellforge-server
+#
+# GPU: requires nvidia-container-toolkit on host
+# CPU-only: just drop --gpus all
+
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH="/opt/python/3.12/bin:$PATH"
+
+ARG CELLFORGE_VERSION=latest
+
+# Pre-built CellForge binary
+ADD https://github.com/Subbok/CellForge/releases/${CELLFORGE_VERSION}/download/cellforge-linux-x64 /usr/local/bin/cellforge-server
+RUN chmod +x /usr/local/bin/cellforge-server
+
+# Base system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates wget curl git build-essential \
+    libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
+    libsqlite3-dev libncurses-dev libffi-dev liblzma-dev \
+    libgdbm-dev uuid-dev tk-dev libomp-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python 3.12 (PyTorch + CUDA) ──
+RUN wget -q https://www.python.org/ftp/python/3.12.8/Python-3.12.8.tgz \
+    && tar -xzf Python-3.12.8.tgz && cd Python-3.12.8 \
+    && ./configure --prefix=/opt/python/3.12 --enable-optimizations --with-lto 2>&1 | tail -1 \
+    && make -j$(nproc) 2>&1 | tail -1 \
+    && make install \
+    && cd .. && rm -rf Python-3.12.8*
+
+RUN /opt/python/3.12/bin/python3 -m pip install --upgrade pip && \
+    /opt/python/3.12/bin/python3 -m pip install \
+    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 && \
+    /opt/python/3.12/bin/python3 -m pip install \
+    ipykernel \
+    numpy scipy pandas matplotlib seaborn plotly \
+    scikit-learn xgboost lightgbm \
+    transformers datasets tokenizers accelerate \
+    pillow opencv-python-headless \
+    requests httpx tqdm rich \
+    jupyter-client ipywidgets && \
+    /opt/python/3.12/bin/python3 -m ipykernel install \
+    --name python312 --display-name "Python 3.12 (PyTorch + CUDA)"
+
+EXPOSE 8888
+WORKDIR /data
+ENTRYPOINT ["cellforge-server", "--host", "0.0.0.0"]
