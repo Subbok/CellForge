@@ -82,17 +82,34 @@ fn find_dist_dir() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Allowed origins for the origin_check middleware and CorsLayer. Reads the
+/// comma-separated `CELLFORGE_ALLOWED_ORIGINS` env var, falling back to the
+/// localhost development set. Parsed once on first access and cached.
+/// Stored lowercased so comparisons are case-insensitive on scheme+host.
+fn allowed_origins() -> &'static [String] {
+    use std::sync::OnceLock;
+    static ORIGINS: OnceLock<Vec<String>> = OnceLock::new();
+    ORIGINS
+        .get_or_init(|| match std::env::var("CELLFORGE_ALLOWED_ORIGINS") {
+            Ok(s) if !s.trim().is_empty() => s
+                .split(',')
+                .map(|o| o.trim().to_lowercase())
+                .filter(|o| !o.is_empty())
+                .collect(),
+            _ => vec![
+                "http://localhost:5173".into(),
+                "http://localhost:8888".into(),
+                "http://127.0.0.1:5173".into(),
+                "http://127.0.0.1:8888".into(),
+            ],
+        })
+        .as_slice()
+}
+
 /// Origin-header check middleware. State-changing requests (POST/PUT/DELETE/PATCH)
-/// must come from one of these origins. Combined with SameSite=Strict cookies
+/// must come from one of the allowed origins. Combined with SameSite=Strict cookies
 /// this blocks CSRF without needing an explicit token scheme. GET is allowed
 /// without an Origin check (browsers don't always send Origin on same-site GETs).
-const ALLOWED_ORIGINS: &[&str] = &[
-    "http://localhost:5173",
-    "http://localhost:8888",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:8888",
-];
-
 async fn origin_check(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
@@ -106,7 +123,10 @@ async fn origin_check(
     if is_state_changing {
         let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
         let allowed = match origin {
-            Some(o) => ALLOWED_ORIGINS.contains(&o),
+            Some(o) => {
+                let lo = o.to_lowercase();
+                allowed_origins().iter().any(|a| a == &lo)
+            }
             // Missing Origin header on a state-changing request — this happens
             // for server-side tools (curl, tests) but browsers always send it
             // on fetch/XHR. Allow it only if there's no Cookie either (i.e. no
@@ -340,18 +360,14 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
     // Any state-changing request (POST/PUT/DELETE/PATCH) whose `Origin` is
     // absent or not in this list is rejected — combined with SameSite=Strict
     // cookies, this gives us CSRF protection without a token scheme.
-    let allowed_origins: Vec<axum::http::HeaderValue> = [
-        "http://localhost:5173",
-        "http://localhost:8888",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:8888",
-    ]
-    .iter()
-    .filter_map(|s| axum::http::HeaderValue::from_str(s).ok())
-    .collect();
+    tracing::info!("allowed origins: {:?}", allowed_origins());
+    let cors_origins: Vec<axum::http::HeaderValue> = allowed_origins()
+        .iter()
+        .filter_map(|s| axum::http::HeaderValue::from_str(s).ok())
+        .collect();
 
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::list(allowed_origins))
+        .allow_origin(AllowOrigin::list(cors_origins))
         .allow_credentials(true)
         .allow_methods([
             axum::http::Method::GET,
