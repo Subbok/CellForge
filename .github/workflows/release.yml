@@ -100,7 +100,6 @@ jobs:
 
       - name: Build desktop app
         if: matrix.desktop
-        continue-on-error: true
         run: cargo build --release --target ${{ matrix.target }} -p cellforge-app
 
       # --- Package: Linux AppImage ---
