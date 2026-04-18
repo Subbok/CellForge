@@ -6,48 +6,77 @@ set -euo pipefail
 echo "=== CellForge Docker Setup ==="
 echo ""
 
-# --- Step 1: Choose kernels ---
-echo "Which kernels? (comma-separated, e.g. 2,4)"
+# --- Step 1: GPU / DL frameworks? ---
+echo "Need a GPU (PyTorch + TensorFlow) kernel?"
 echo ""
-echo "  [1] Python        (ipykernel — always included)"
-echo "  [2] R             (IRkernel)"
-echo "  [3] Julia          (IJulia)"
-echo "  [4] JavaScript    (ijavascript)"
-echo "  [5] Kotlin        (kotlin-jupyter)"
-echo "  [6] Ruby           (iruby)"
+echo "  [y] Yes — cellforge-server-ai base (~8 GB, amd64 only, GPU)"
+echo "  [n] No  — cellforge-server base (~2 GB, amd64 + arm64, no DL)"
 echo ""
-echo "  [a] Python only    [b] All"
+read -rp "Choice [n]: " gpu </dev/tty
+gpu=${gpu:-n}
+
+case "$gpu" in
+  y|Y|yes)
+    BASE="ghcr.io/subbok/cellforge-server-ai:latest"
+    NEED_GPU=true
+    ;;
+  *)
+    BASE="ghcr.io/subbok/cellforge-server:latest"
+    NEED_GPU=false
+    ;;
+esac
+
+# --- Step 2: Extra kernels on top of Python ---
 echo ""
-read -rp "Choice [a]: " choice </dev/tty
-choice=${choice:-a}
+echo "Extra kernels on top of the bundled Python? (comma-separated, e.g. 1,3)"
+echo ""
+echo "  [1] R             (IRkernel)"
+echo "  [2] Julia         (IJulia)"
+echo "  [3] JavaScript    (ijavascript)"
+echo "  [4] Kotlin        (kotlin-jupyter)"
+echo "  [5] Ruby          (iruby)"
+echo ""
+echo "  [n] None — just Python    [a] All"
+echo ""
+read -rp "Choice [n]: " choice </dev/tty
+choice=${choice:-n}
 
 R=false; JULIA=false; JS=false; KOTLIN=false; RUBY=false
 
 case "$choice" in
-  a|1) ;;
-  b)   R=true; JULIA=true; JS=true; KOTLIN=true; RUBY=true ;;
+  n) ;;
+  a) R=true; JULIA=true; JS=true; KOTLIN=true; RUBY=true ;;
   *)
     IFS=',' read -ra picks <<< "$choice"
     for p in "${picks[@]}"; do
       case "$(echo "$p" | tr -d ' ')" in
-        2) R=true ;; 3) JULIA=true ;; 4) JS=true ;;
-        5) KOTLIN=true ;; 6) RUBY=true ;;
+        1) R=true ;; 2) JULIA=true ;; 3) JS=true ;;
+        4) KOTLIN=true ;; 5) RUBY=true ;;
       esac
     done ;;
 esac
 
+# --- Step 3: Port, notebook directory, optional CORS origin ---
 read -rp "Port [8888]: " port </dev/tty
 port=${port:-8888}
 
 read -rp "Notebook directory [~/notebooks]: " nb_dir </dev/tty
 nb_dir=${nb_dir:-~/notebooks}
 
-selected="Python"
-$R && selected="$selected, R";        $JULIA && selected="$selected, Julia"
-$JS && selected="$selected, JavaScript"; $KOTLIN && selected="$selected, Kotlin"
-$RUBY && selected="$selected, Ruby"
+echo ""
+echo "Access URL for the browser (e.g. https://notebooks.example.com)."
+echo "Leave empty if you only ever open CellForge via http://localhost:${port}."
+read -rp "Extra allowed origin: " origin </dev/tty
+origin=${origin:-}
 
-# --- Generate inline Dockerfile inside docker-compose.yml ---
+kernel_list="Python"
+$R && kernel_list="$kernel_list, R"
+$JULIA && kernel_list="$kernel_list, Julia"
+$JS && kernel_list="$kernel_list, JavaScript"
+$KOTLIN && kernel_list="$kernel_list, Kotlin"
+$RUBY && kernel_list="$kernel_list, Ruby"
+
+# --- Generate docker-compose.yml with an inline Dockerfile ---
 {
 cat << HEADER
 services:
@@ -55,15 +84,7 @@ services:
     build:
       context: .
       dockerfile_inline: |
-        FROM debian:bookworm-slim
-
-        ADD https://github.com/Subbok/CellForge/releases/latest/download/cellforge-linux-x64 /usr/local/bin/cellforge-server
-        RUN chmod +x /usr/local/bin/cellforge-server
-
-        RUN apt-get update && apt-get install -y --no-install-recommends \\
-            python3 python3-pip python3-venv ca-certificates \\
-            && rm -rf /var/lib/apt/lists/* \\
-            && python3 -m pip install --break-system-packages ipykernel
+        FROM ${BASE}
 HEADER
 
 if $R; then cat << 'BLOCK'
@@ -100,7 +121,7 @@ fi
 if $KOTLIN; then cat << 'BLOCK'
 
         RUN apt-get update && apt-get install -y --no-install-recommends \
-            default-jdk wget unzip \
+            default-jdk \
             && rm -rf /var/lib/apt/lists/* \
             && python3 -m pip install --break-system-packages kotlin-jupyter-kernel
 BLOCK
@@ -117,21 +138,40 @@ BLOCK
 fi
 
 cat << FOOTER
-
-        EXPOSE 8888
-        WORKDIR /data
-        ENTRYPOINT ["cellforge-server", "--host", "0.0.0.0"]
     ports:
       - "${port}:8888"
     volumes:
       - ${nb_dir}:/data
     restart: unless-stopped
 FOOTER
+
+if [ -n "$origin" ]; then
+cat << ORIGIN
+    environment:
+      CELLFORGE_ALLOWED_ORIGINS: ${origin}
+ORIGIN
+fi
+
+if $NEED_GPU; then
+cat << 'GPU_BLOCK'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+GPU_BLOCK
+fi
 } > docker-compose.yml
 
 echo ""
-echo "Saved: ./docker-compose.yml (kernels: $selected)"
+echo "Saved: ./docker-compose.yml"
+echo "  base:    $BASE"
+echo "  kernels: $kernel_list"
+[ -n "$origin" ] && echo "  origin:  $origin"
+$NEED_GPU && echo "  gpu:     nvidia (all devices)"
 echo ""
 echo "Run:"
 echo "  docker compose up -d"
-echo "  open http://localhost:$port"
+echo "  open http://localhost:${port}"

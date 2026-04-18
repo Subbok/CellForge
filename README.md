@@ -2,7 +2,7 @@
 
 > A modern notebook IDE — Rust backend, React frontend, real Jupyter kernels, live collaboration, and PDF export via Typst.
 
-![version](https://img.shields.io/badge/version-0.4.0-blue)
+![version](https://img.shields.io/badge/version-0.5.0-blue)
 ![rust](https://img.shields.io/badge/rust-2024-orange)
 ![react](https://img.shields.io/badge/react-19-61dafb)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-green)
@@ -19,16 +19,23 @@
 curl -fsSL https://github.com/Subbok/CellForge/releases/latest/download/cellforge-linux-x64 -o cellforge && chmod +x cellforge && ./cellforge
 ```
 
-**Docker (pre-built, recommended):**
+**Docker — pick your image:**
 
 ```bash
-docker run --gpus all -p 8888:8888 -v ~/notebooks:/data \
+# Lean default — Python 3.12 + scientific/data stack, no DL frameworks.
+# Multi-arch (linux/amd64, linux/arm64). ~2 GB.
+docker run -p 8888:8888 -v ~/notebooks:/data \
   ghcr.io/subbok/cellforge-server:latest
+
+# AI — lean + PyTorch and TensorFlow kernels, GPU-accelerated (CUDA 12.6).
+# linux/amd64 only. ~8 GB. Needs nvidia-container-toolkit on the host.
+docker run --gpus all -p 8888:8888 -v ~/notebooks:/data \
+  ghcr.io/subbok/cellforge-server-ai:latest
 ```
 
-Includes Python 3.12, PyTorch + CUDA 12.6, and the full ML stack. Drop `--gpus all` for CPU-only.
+The AI image registers three kernels in the dropdown: **Python 3.12 (CPU)**, **(PyTorch)**, **(TensorFlow)**. Pick the CPU kernel for plotting/data work (fast startup), switch to PyTorch or TensorFlow when you need the GPU.
 
-**Docker (custom kernels):**
+**Docker (custom kernel set — R, Julia, JavaScript, Kotlin, Ruby):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Subbok/CellForge/main/scripts/docker-install.sh | bash
@@ -38,14 +45,14 @@ Or grab a binary from [Releases](../../releases):
 
 | Platform | Server | Desktop |
 |---|---|---|
-| Linux x64 | `cellforge-linux-x64` | — |
+| Linux x64 | `cellforge-linux-x64` | `cellforge-linux-x64-desktop.AppImage` |
 | Linux ARM64 | `cellforge-linux-arm64` | — |
-| macOS x64 | `cellforge-macos-x64` | — |
-| macOS ARM | `cellforge-macos-arm64` | — |
+| macOS x64 | `cellforge-macos-x64` | `cellforge-macos-x64-desktop.dmg` |
+| macOS ARM | `cellforge-macos-arm64` | `cellforge-macos-arm64-desktop.dmg` |
 | Windows x64 | `cellforge-windows-x64.exe` | `cellforge-windows-x64-desktop.exe` |
 | Windows ARM64 | `cellforge-windows-arm64.exe` | `cellforge-windows-arm64-desktop.exe` |
 
-**Server** opens in your browser at http://localhost:8888. Single portable file with the frontend and Typst compiler embedded (~30 MB). **Desktop** (Windows only for now) is a native window — same features, no browser needed.
+**Server** opens in your browser at http://localhost:8888. Single portable file with the frontend and Typst compiler embedded (~30 MB). **Desktop** is a native window (Linux AppImage, macOS .dmg, Windows .exe) — same features, no browser needed.
 
 You need at least one Jupyter kernel installed: `pip install ipykernel`
 

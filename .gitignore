@@ -41,3 +41,6 @@ __pycache__/
 *.png
 !assets/*.png
 Dockerfile.server.build
+
+# Wiki — checked out as a nested repo for editing, not part of this repo
+Wiki/
