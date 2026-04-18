@@ -1,9 +1,12 @@
 # CellForge AI — GPU-accelerated image with PyTorch and TensorFlow kernels.
 # Builds on top of the lean cellforge-server image.
 #
-# CI build: docker buildx picks up BASE_IMAGE + CELLFORGE_VERSION args from the workflow.
-# Local build (requires lean image built and tagged first):
-#   docker build -f Dockerfile.server -t cellforge-server:dev .
+# CELLFORGE_VERSION must match a published tag (no default; see Dockerfile.server
+# for the rationale). BASE_IMAGE defaults to the GHCR repo so CI works out of the
+# box; for local builds against a locally-tagged lean image, override it:
+#
+#   docker build -f Dockerfile.server --build-arg CELLFORGE_VERSION=v0.4.5 \
+#     -t cellforge-server:dev .
 #   docker build -f Dockerfile.server-ai \
 #     --build-arg BASE_IMAGE=cellforge-server --build-arg CELLFORGE_VERSION=dev \
 #     -t cellforge-server-ai .
@@ -12,7 +15,7 @@
 # Requires nvidia-container-toolkit on the host.
 
 ARG BASE_IMAGE=ghcr.io/subbok/cellforge-server
-ARG CELLFORGE_VERSION=v0.4.5
+ARG CELLFORGE_VERSION
 FROM ${BASE_IMAGE}:${CELLFORGE_VERSION}
 
 ENV NVIDIA_VISIBLE_DEVICES=all

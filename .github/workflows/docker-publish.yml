@@ -25,8 +25,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  LEAN_IMAGE: ${{ github.repository_owner }}/cellforge-server
-  AI_IMAGE: ${{ github.repository_owner }}/cellforge-server-ai
+  # Owner hardcoded lowercase because docker image refs must be lowercase and
+  # github.repository_owner preserves the original casing (Subbok).
+  LEAN_IMAGE: subbok/cellforge-server
+  AI_IMAGE: subbok/cellforge-server-ai
 
 jobs:
   lean:

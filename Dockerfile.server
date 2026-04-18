@@ -1,7 +1,16 @@
 # CellForge — lean notebook server (Python 3.12, no DL frameworks)
-# Build (amd64): docker build -f Dockerfile.server -t cellforge-server .
+#
+# CELLFORGE_VERSION must match a published GitHub release tag (e.g. v0.4.5).
+# There is no default: CI sets it from steps.resolve.outputs.tag, and local
+# builds are forced to pass it explicitly so no one silently pulls a stale
+# binary after a release bump.
+#
+# Build (amd64):
+#   docker build -f Dockerfile.server --build-arg CELLFORGE_VERSION=v0.4.5 \
+#     -t cellforge-server .
 # Build (multi-arch, via buildx):
-#   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.server -t cellforge-server .
+#   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.server \
+#     --build-arg CELLFORGE_VERSION=v0.4.5 -t cellforge-server .
 # Run: docker run -p 8888:8888 -v $PWD:/data cellforge-server
 #
 # For GPU + PyTorch + TensorFlow, see Dockerfile.server-ai.
@@ -10,7 +19,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-ARG CELLFORGE_VERSION=v0.4.5
+ARG CELLFORGE_VERSION
 ARG TARGETARCH
 
 # System deps (stable layer)
