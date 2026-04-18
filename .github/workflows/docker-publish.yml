@@ -42,6 +42,7 @@ jobs:
       packages: write
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
+      docker_tag: ${{ steps.resolve.outputs.docker_tag }}
 
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +72,12 @@ jobs:
       # - workflow_dispatch → inputs.tag
       # - workflow_run (po Release na tag pushu) → workflow_run.head_branch
       # - schedule / push main → query latest release via gh CLI
+      #
+      # Outputs:
+      #   tag        = tag release literal (np. v0.4.5) — używany w URL do binarki
+      #   docker_tag = stripped v (np. 0.4.5) — używany jako docker image tag,
+      #                bo docker/metadata-action auto-strippuje v przy type=semver,
+      #                więc ai musi FROM lean:0.4.5 nie :v0.4.5
       - name: Resolve CellForge version tag
         id: resolve
         env:
@@ -88,8 +95,10 @@ jobs:
             echo "Could not resolve a CellForge release tag" >&2
             exit 1
           fi
+          DOCKER_TAG="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Resolved tag: $TAG"
+          echo "docker_tag=$DOCKER_TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG (docker_tag: $DOCKER_TAG)"
 
       - name: Extract metadata (lean)
         id: meta
@@ -164,6 +173,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.LEAN_IMAGE }}
-            CELLFORGE_VERSION=${{ needs.lean.outputs.tag }}
+            CELLFORGE_VERSION=${{ needs.lean.outputs.docker_tag }}
           cache-from: type=gha,scope=ai
           cache-to: type=gha,scope=ai,mode=max
