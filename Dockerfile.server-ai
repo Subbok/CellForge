@@ -1,0 +1,44 @@
+# CellForge AI — GPU-accelerated image with PyTorch and TensorFlow kernels.
+# Builds on top of the lean cellforge-server image.
+#
+# CI build: docker buildx picks up BASE_IMAGE + CELLFORGE_VERSION args from the workflow.
+# Local build (requires lean image built and tagged first):
+#   docker build -f Dockerfile.server -t cellforge-server:dev .
+#   docker build -f Dockerfile.server-ai \
+#     --build-arg BASE_IMAGE=cellforge-server --build-arg CELLFORGE_VERSION=dev \
+#     -t cellforge-server-ai .
+# Run: docker run --gpus all -p 8888:8888 -v $PWD:/data cellforge-server-ai
+#
+# Requires nvidia-container-toolkit on the host.
+
+ARG BASE_IMAGE=ghcr.io/subbok/cellforge-server
+ARG CELLFORGE_VERSION=v0.4.5
+FROM ${BASE_IMAGE}:${CELLFORGE_VERSION}
+
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# PyTorch kernel. --system-site-packages lets the venv see numpy/pandas/etc.
+# from the lean base without duplication.
+RUN uv venv --system-site-packages /venvs/torch \
+ && uv pip install --python /venvs/torch/bin/python \
+      --index-url https://download.pytorch.org/whl/cu126 \
+      torch torchvision torchaudio \
+ && uv pip install --python /venvs/torch/bin/python \
+      transformers accelerate datasets tokenizers \
+      peft bitsandbytes diffusers sentencepiece einops \
+      lightning timm opencv-python-headless \
+      ipykernel \
+ && /venvs/torch/bin/python -m ipykernel install \
+      --name torch --display-name "Python 3.12 (PyTorch)"
+
+# TensorFlow kernel.
+RUN uv venv --system-site-packages /venvs/tf \
+ && uv pip install --python /venvs/tf/bin/python \
+      "tensorflow[and-cuda]" \
+      keras-cv keras-nlp tensorflow-text \
+      tensorflow-datasets tensorflow-hub tensorflow-probability \
+      transformers \
+      ipykernel \
+ && /venvs/tf/bin/python -m ipykernel install \
+      --name tf --display-name "Python 3.12 (TensorFlow)"

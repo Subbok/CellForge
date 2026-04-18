@@ -1,50 +1,132 @@
-name: Build and Push Docker Image
+name: Build and Push Docker Images
 
 on:
-  # Automatycznie przy każdym nowym release
-  release:
-    types: [published]
-  # Ręcznie z dashboardu Actions (tag jako input)
+  # Po zakończeniu Release workflow (a nie równolegle z nim — to usuwa race
+  # condition gdzie docker-publish startował zanim binarki były w release)
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  # Ręczny rebuild konkretnej wersji
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag obrazu (np. latest, v0.3.0)'
+        description: 'Tag release CellForge do zbudowania (np. v0.4.5)'
         required: true
-        default: 'latest'
-  # Automatyczny tygodniowy rebuild (base image CVE fixes)
+  # Tygodniowy rebuild dla CVE fixów w base image (lean + AI)
   schedule:
     - cron: '0 3 * * 0'  # niedziela 3:00 UTC
-  # Przy zmianie Dockerfile lub workflow + przy nowym tagu v*
+  # Przy zmianie Dockerfile'ów lub tego workflow
   push:
     branches: [main]
-    tags: ['v*']
     paths:
       - 'Dockerfile.server'
+      - 'Dockerfile.server-ai'
       - '.github/workflows/docker-publish.yml'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/cellforge-server
+  LEAN_IMAGE: ${{ github.repository_owner }}/cellforge-server
+  AI_IMAGE: ${{ github.repository_owner }}/cellforge-server-ai
 
 jobs:
-  build-and-push:
+  lean:
+    # Jeśli trigger to workflow_run po NIEUDANYM Release, nie buduj
+    if: >
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Zwolnienie miejsca na runnerze — GHA ma ~14 GB, multi-arch buildx
+      # + uv cache potrafi to zjeść.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo apt-get clean
+          df -h
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag siedzi w różnych miejscach zależnie od triggera:
+      # - workflow_dispatch → inputs.tag
+      # - workflow_run (po Release na tag pushu) → workflow_run.head_branch
+      # - schedule / push main → query latest release via gh CLI
+      - name: Resolve CellForge version tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ "${{ github.event.workflow_run.event }}" = "push" ] && \
+               [[ "${{ github.event.workflow_run.head_branch }}" == v* ]]; then
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          else
+            TAG=$(gh release view --json tagName -q .tagName --repo ${{ github.repository }})
+          fi
+          if [ -z "$TAG" ]; then
+            echo "Could not resolve a CellForge release tag" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG"
+
+      - name: Extract metadata (lean)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.LEAN_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.resolve.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.resolve.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ steps.resolve.outputs.tag }}
+            type=raw,value=latest
+
+      - name: Build and push (lean)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.server
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            CELLFORGE_VERSION=${{ steps.resolve.outputs.tag }}
+          cache-from: type=gha,scope=lean
+          cache-to: type=gha,scope=lean,mode=max
+
+  ai:
+    needs: lean
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Zwolnienie miejsca na runnerze — GHA ma tylko ~14 GB disk,
-      # a obraz z PyTorch + CUDA waży ~8-10 GB. Bez tego build pada na "no space left".
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
           sudo apt-get clean
           df -h
 
@@ -58,26 +140,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Extract metadata (ai)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.AI_IMAGE }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{version}},value=${{ needs.lean.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.lean.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ needs.lean.outputs.tag }}
+            type=raw,value=latest
 
-      - name: Build and push
+      - name: Build and push (ai)
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.server
+          file: ./Dockerfile.server-ai
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.LEAN_IMAGE }}
+            CELLFORGE_VERSION=${{ needs.lean.outputs.tag }}
+          cache-from: type=gha,scope=ai
+          cache-to: type=gha,scope=ai,mode=max
