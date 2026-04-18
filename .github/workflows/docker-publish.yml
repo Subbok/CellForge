@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag release CellForge do zbudowania (np. v0.4.5)'
+        description: 'Tag release CellForge do zbudowania (np. v0.5.0)'
         required: true
   # Tygodniowy rebuild dla CVE fixów w base image (lean + AI)
   schedule:
@@ -74,10 +74,10 @@ jobs:
       # - schedule / push main → query latest release via gh CLI
       #
       # Outputs:
-      #   tag        = tag release literal (np. v0.4.5) — używany w URL do binarki
-      #   docker_tag = stripped v (np. 0.4.5) — używany jako docker image tag,
+      #   tag        = tag release literal (np. v0.5.0) — używany w URL do binarki
+      #   docker_tag = stripped v (np. 0.5.0) — używany jako docker image tag,
       #                bo docker/metadata-action auto-strippuje v przy type=semver,
-      #                więc ai musi FROM lean:0.4.5 nie :v0.4.5
+      #                więc ai musi FROM lean:0.5.0 nie :v0.5.0
       - name: Resolve CellForge version tag
         id: resolve
         env:

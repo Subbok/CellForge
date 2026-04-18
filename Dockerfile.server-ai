@@ -5,7 +5,7 @@
 # for the rationale). BASE_IMAGE defaults to the GHCR repo so CI works out of the
 # box; for local builds against a locally-tagged lean image, override it:
 #
-#   docker build -f Dockerfile.server --build-arg CELLFORGE_VERSION=v0.4.5 \
+#   docker build -f Dockerfile.server --build-arg CELLFORGE_VERSION=v0.5.0 \
 #     -t cellforge-server:dev .
 #   docker build -f Dockerfile.server-ai \
 #     --build-arg BASE_IMAGE=cellforge-server --build-arg CELLFORGE_VERSION=dev \
