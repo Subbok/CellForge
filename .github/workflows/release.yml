@@ -3,6 +3,9 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Manual dispatch — useful for validating desktop builds between tagged
+  # releases without creating a GitHub Release (no tag = no release created).
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -253,6 +256,9 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    # Only create a GitHub Release when triggered by a tag push; skip on
+    # workflow_dispatch runs (those are for validating the build pipeline).
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@v5
         with:

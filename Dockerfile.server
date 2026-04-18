@@ -34,12 +34,15 @@ RUN uv pip install --system --break-system-packages \
        --display-name "Python 3.12 (CPU)"
 
 # Server binary — this layer is the only one invalidated by release bumps.
+# curl retries with --retry-all-errors so transient 5xx from github.com
+# (we've seen 504 gateway timeouts) don't fail the build outright.
 RUN case "$TARGETARCH" in \
         amd64) ARCH=x64 ;; \
         arm64) ARCH=arm64 ;; \
         *) echo "unsupported arch: $TARGETARCH" >&2; exit 1 ;; \
     esac \
- && curl -fsSL -o /usr/local/bin/cellforge-server \
+ && curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL \
+      -o /usr/local/bin/cellforge-server \
       "https://github.com/Subbok/CellForge/releases/download/${CELLFORGE_VERSION}/cellforge-linux-${ARCH}" \
  && chmod +x /usr/local/bin/cellforge-server
 
