@@ -260,7 +260,7 @@ jobs:
     # workflow_dispatch runs (those are for validating the build pipeline).
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
