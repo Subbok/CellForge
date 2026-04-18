@@ -21,6 +21,7 @@ fn main() -> Result<()> {
     let config = cellforge_server::Config {
         host: "127.0.0.1".to_string(),
         port,
+        allow_network: false,
         notebook_dir: std::env::current_dir().unwrap_or_default(),
         notebook: None,
         no_update_check: false,
