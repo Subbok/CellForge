@@ -91,7 +91,7 @@ jobs:
 
       - name: Extract metadata (lean)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.LEAN_IMAGE }}
           tags: |
@@ -142,7 +142,7 @@ jobs:
 
       - name: Extract metadata (ai)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.AI_IMAGE }}
           tags: |
