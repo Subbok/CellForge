@@ -41,6 +41,9 @@ export function CodeCell({ cell, index }: { cell: Cell; index: number }) {
   const execRef = useRef(execute);
   // eslint-disable-next-line react-hooks/refs
   execRef.current = execute;
+  const monacoLangRef = useRef(monacoLang);
+  // eslint-disable-next-line react-hooks/refs
+  monacoLangRef.current = monacoLang;
 
   // update search highlighting decorations when query changes
   useEffect(() => {
@@ -143,7 +146,7 @@ export function CodeCell({ cell, index }: { cell: Cell; index: number }) {
       if (ctrl && shift && e.keyCode === 39 /* KeyI */) {
         e.preventDefault();
         e.stopPropagation();
-        if (monacoLang === 'python') {
+        if (monacoLangRef.current === 'python') {
           formatPythonCode(sourceRef.current).then(result => {
             if (result && result !== sourceRef.current) {
               useNotebookStore.getState().updateSource(cellIdRef.current, result);
