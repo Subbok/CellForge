@@ -194,7 +194,7 @@
     "noPlugins": "No plugins installed.",
     "removePlugin": "Remove plugin",
     "about": "About",
-    "aboutDescription": "v0.4.0 — Notebook IDE. Rust + React + Typst.",
+    "aboutDescription": "v1.0.0 — Notebook IDE. Rust + React + Typst.",
     "newPassword": "New password",
     "confirmPassword": "Confirm password",
     "passwordMinLength": "Password must be at least 4 characters",

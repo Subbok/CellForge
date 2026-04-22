@@ -31,10 +31,6 @@ pub struct Config {
     /// Enable hub mode (admin panel, resource limits, groups)
     #[arg(long)]
     pub hub: bool,
-
-    /// Idle kernel timeout in minutes (hub mode only, default: 30)
-    #[arg(long, default_value_t = 30)]
-    pub idle_timeout: u64,
 }
 
 impl Config {

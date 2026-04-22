@@ -130,6 +130,8 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status}`);
   },
   sharedFiles: () => get<{ id: number; from_user: string; file_name: string; shared_at: string }[]>('/files/shared'),
+  sharesByMe: (fileName: string) =>
+    get<{ id: number; to_user: string }[]>(`/files/shares-by-me?file_name=${encodeURIComponent(fileName)}`),
   unshareFile: (shareId: number) => post<void>('/files/unshare', { share_id: shareId }),
   shareUsers: () => get<{ username: string; display_name: string }[]>('/files/share-users'),
   getConfig: () => get<{ notebook_dir: string; initial_notebook: string | null }>('/config'),

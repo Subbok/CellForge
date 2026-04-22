@@ -1,8 +1,27 @@
 use crate::format::Notebook;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 
+/// Hard cap on notebook file size. Refuses to even read files larger than
+/// this into memory — blocks the DoS vector where a malicious user drops a
+/// multi-GB `.ipynb` into a shared workspace and causes every reader to OOM.
+/// 32 MiB covers the largest real notebooks (ML training runs with embedded
+/// plots) while staying safely under any reasonable server memory budget.
+pub const MAX_NOTEBOOK_SIZE: u64 = 32 * 1024 * 1024;
+
 pub fn read_notebook(path: &Path) -> Result<Notebook> {
+    // Stat first and reject oversize files without reading — prevents
+    // allocating a huge String only to fail parsing.
+    let meta = std::fs::metadata(path)
+        .with_context(|| format!("Failed to stat notebook: {}", path.display()))?;
+    if meta.len() > MAX_NOTEBOOK_SIZE {
+        bail!(
+            "notebook '{}' is {} MiB, exceeds {} MiB cap",
+            path.display(),
+            meta.len() / 1024 / 1024,
+            MAX_NOTEBOOK_SIZE / 1024 / 1024
+        );
+    }
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read notebook: {}", path.display()))?;
     let notebook: Notebook = serde_json::from_str(&content)

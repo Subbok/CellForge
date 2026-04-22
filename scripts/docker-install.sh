@@ -15,13 +15,32 @@ echo ""
 read -rp "Choice [n]: " gpu </dev/tty
 gpu=${gpu:-n}
 
+# Resolve the latest stable release tag so the generated compose pins a
+# specific version instead of tracking :latest. Falls back to :latest if
+# GitHub is unreachable (offline install, API rate limit, etc.).
+resolve_release_tag() {
+  local raw
+  raw=$(curl -fsSL --max-time 5 \
+        "https://api.github.com/repos/Subbok/CellForge/releases/latest" 2>/dev/null \
+        | grep '"tag_name"' | head -1 \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+  if [ -z "$raw" ]; then
+    echo "latest"
+  else
+    # docker image tags are published without the 'v' prefix (semver pattern)
+    echo "${raw#v}"
+  fi
+}
+
+RESOLVED_TAG=$(resolve_release_tag)
+
 case "$gpu" in
   y|Y|yes)
-    BASE="ghcr.io/subbok/cellforge-server-ai:latest"
+    BASE="ghcr.io/subbok/cellforge-server-ai:${RESOLVED_TAG}"
     NEED_GPU=true
     ;;
   *)
-    BASE="ghcr.io/subbok/cellforge-server:latest"
+    BASE="ghcr.io/subbok/cellforge-server:${RESOLVED_TAG}"
     NEED_GPU=false
     ;;
 esac
@@ -168,6 +187,7 @@ fi
 echo ""
 echo "Saved: ./docker-compose.yml"
 echo "  base:    $BASE"
+[ "$RESOLVED_TAG" = "latest" ] && echo "           (warning: could not resolve release tag, pinned to :latest)"
 echo "  kernels: $kernel_list"
 [ -n "$origin" ] && echo "  origin:  $origin"
 $NEED_GPU && echo "  gpu:     nvidia (all devices)"

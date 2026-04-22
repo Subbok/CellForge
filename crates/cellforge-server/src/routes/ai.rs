@@ -10,10 +10,10 @@ use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// Hosts that the AI proxy is allowed to forward requests to. Prevents SSRF —
-/// an authenticated user could otherwise use the server as a proxy to hit
-/// arbitrary internal/external URLs. Localhost is included so Ollama works.
-const ALLOWED_AI_HOSTS: &[&str] = &[
+/// Remote hosts that the AI proxy is allowed to forward requests to.
+/// Prevents SSRF — an authenticated user could otherwise use the server as a
+/// proxy to hit arbitrary internal/external URLs.
+const ALLOWED_REMOTE_AI_HOSTS: &[&str] = &[
     "api.anthropic.com",
     "api.openai.com",
     "generativelanguage.googleapis.com",
@@ -21,14 +21,18 @@ const ALLOWED_AI_HOSTS: &[&str] = &[
     "api.groq.com",
     "api.mistral.ai",
     "openrouter.ai",
-    "localhost",
-    "127.0.0.1",
 ];
 
-/// Extract just the host component from a URL string (no scheme, port, path).
-/// Returns None if the URL is malformed. Used for allowlist checking only —
-/// doesn't need to be a full RFC-3986 parser.
-fn parse_host(base_url: &str) -> Option<&str> {
+/// Localhost entries allowed only for Ollama. Requests must target the Ollama
+/// chat endpoint — without this path-prefix restriction an authenticated user
+/// could use `base_url=http://127.0.0.1:<any-port>` to poke other local
+/// services running in the container's network namespace.
+const ALLOWED_LOCALHOST_HOSTS: &[&str] = &["localhost", "127.0.0.1"];
+const ALLOWED_LOCALHOST_PATH_PREFIX: &str = "/api/chat";
+
+/// Extract (host, path) from a URL string. Returns None if the URL is
+/// malformed. Used for allowlist checking only — not a full RFC-3986 parser.
+fn parse_host_and_path(base_url: &str) -> Option<(&str, &str)> {
     // strip scheme
     let rest = base_url
         .split_once("://")
@@ -36,20 +40,37 @@ fn parse_host(base_url: &str) -> Option<&str> {
         .unwrap_or(base_url);
     // strip userinfo
     let rest = rest.split_once('@').map(|(_, r)| r).unwrap_or(rest);
-    // take up to first '/', '?', or '#'
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let hostport = &rest[..end];
-    // strip port
+    // split at first '/', '?', or '#' to separate hostport from path+query
+    let path_start = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let hostport = &rest[..path_start];
+    let path = &rest[path_start..];
+    // strip port from hostport
     let host = hostport
         .rsplit_once(':')
         .map(|(h, _)| h)
         .unwrap_or(hostport);
-    if host.is_empty() { None } else { Some(host) }
+    if host.is_empty() {
+        None
+    } else {
+        Some((host, path))
+    }
 }
 
 fn host_is_allowed(base_url: &str) -> bool {
-    match parse_host(base_url) {
-        Some(h) => ALLOWED_AI_HOSTS.contains(&h),
+    match parse_host_and_path(base_url) {
+        Some((host, path)) => {
+            if ALLOWED_REMOTE_AI_HOSTS.contains(&host) {
+                true
+            } else if ALLOWED_LOCALHOST_HOSTS.contains(&host) {
+                // Localhost is only allowed to reach Ollama's chat endpoint.
+                // This blocks the authenticated-SSRF vector where a user
+                // sets base_url=http://127.0.0.1:<port>/anything to probe
+                // co-hosted services.
+                path.is_empty() || path.starts_with(ALLOWED_LOCALHOST_PATH_PREFIX)
+            } else {
+                false
+            }
+        }
         None => false,
     }
 }
@@ -235,8 +256,14 @@ async fn call_openai_compat(req: &AiChatReq) -> Result<String, String> {
 }
 
 fn http_client() -> reqwest::Client {
+    // `Policy::none()` stops reqwest from silently following 3xx redirects.
+    // Without this, an allowlisted upstream (or any server that happens to
+    // 302) could redirect us to an internal address, bypassing the host
+    // allowlist entirely. All legitimate AI provider APIs respond with 2xx,
+    // so this is a safe tightening.
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 }

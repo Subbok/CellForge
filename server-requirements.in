@@ -1,0 +1,27 @@
+# Input spec for CellForge server-side scientific Python stack.
+# Used by `uv pip compile` to produce server-requirements.lock with hashes.
+ipykernel
+numpy
+scipy
+matplotlib
+pandas
+scikit-learn
+ipywidgets
+rich
+tqdm
+pillow
+jupyter-client
+polars
+pyarrow
+duckdb
+plotly
+seaborn
+openpyxl
+statsmodels
+sympy
+networkx
+pytest
+black
+ruff
+requests
+httpx

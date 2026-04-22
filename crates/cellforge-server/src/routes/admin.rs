@@ -114,13 +114,16 @@ pub async fn update_user(
         .update_user_limits(&username, max_kernels, max_memory_mb, &group_name)
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    // Handle is_active toggle if provided
-    if let Some(active) = req.is_active
-        && active
-    {
-        let _ = state.users.touch_user_active(&username);
-        // Note: deactivation would need a separate DB method; touch_user_active
-        // only sets active=true. For now we only support activation via this field.
+    // Handle is_active toggle — both directions now work.
+    // `is_active=true` → reactivate (clear is_disabled) and bump last_active;
+    // `is_active=false` → deactivate (set is_disabled, invalidate JWTs).
+    if let Some(active) = req.is_active {
+        if active {
+            let _ = state.users.reactivate_user(&username);
+            let _ = state.users.touch_user_active(&username);
+        } else {
+            let _ = state.users.deactivate_user(&username);
+        }
     }
 
     Ok(StatusCode::OK)

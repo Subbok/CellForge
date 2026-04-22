@@ -90,6 +90,73 @@ function WidgetRenderer({ widget, cellId }: { widget: WidgetData; cellId: string
 }
 
 /**
+ * Render user-provided `text/html` cell output inside a sandboxed iframe
+ * with a null origin. Scripts still run (ipywidgets, plotly event hooks),
+ * but they execute in an isolated origin — same-origin `fetch('/api/*')`
+ * is blocked, so a malicious notebook author can't escalate to session
+ * takeover against the viewer even if their HTML injects `<script>`.
+ * Matches the JupyterLab threat model.
+ * Height is synced to content via a small postMessage handshake injected
+ * into the iframe's srcdoc. Parent is capped at 800px to keep layout sane;
+ * content taller than that scrolls inside the iframe.
+ */
+function HtmlCellOutput({ html }: { html: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState<number>(48);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== iframe.contentWindow) return;
+      const msg = e.data as { type?: string; height?: number } | null;
+      if (msg && msg.type === 'cellforge-iframe-height') {
+        const h = Number(msg.height);
+        if (Number.isFinite(h) && h > 0) {
+          setHeight(Math.min(h + 8, 800));
+        }
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // Inline theming so iframe content blends with the notebook colors.
+  // The script block posts scrollHeight to the parent so the iframe can
+  // resize to fit. `sandbox="allow-scripts"` without `allow-same-origin`
+  // gives the iframe a null origin — user scripts cannot reach
+  // CellForge's origin via fetch/XHR/Cookie/localStorage.
+  const srcDoc = `<!DOCTYPE html><html><head><style>
+    body { margin: 0; padding: 8px; font-family: ui-sans-serif, system-ui, sans-serif;
+           color: #ebedf2; background: transparent; font-size: 14px; line-height: 1.5; }
+    a { color: #7a99ff; }
+    table { border-collapse: collapse; }
+    th, td { padding: 4px 8px; border: 1px solid #3f4154; text-align: left; }
+    pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    img { max-width: 100%; }
+  </style></head><body>${html}
+<script>
+  function report() {
+    parent.postMessage({ type: 'cellforge-iframe-height', height: document.body.scrollHeight }, '*');
+  }
+  window.addEventListener('load', report);
+  try { new ResizeObserver(report).observe(document.body); } catch (e) {}
+</script>
+  </body></html>`;
+
+  return (
+    <iframe
+      ref={iframeRef}
+      sandbox="allow-scripts"
+      srcDoc={srcDoc}
+      className="w-full border-0 block"
+      style={{ height: `${height}px`, maxHeight: '800px' }}
+      title="cell-html-output"
+    />
+  );
+}
+
+/**
  * Delegate rendering to a plugin-registered MIME handler.
  * Mounts a container div, calls the async handler, and shows a placeholder
  * while it's loading (useful when the handler lazy-imports a CDN library).
@@ -160,10 +227,7 @@ export function CellOutput({ output, cellId, searchQuery }: { output: CellOutput
         return <WidgetRenderer widget={widget} cellId={cellId} />;
       }
       if (data['text/html']) {
-        return (
-          <div className="text-sm px-2 py-1 overflow-x-auto"
-            dangerouslySetInnerHTML={{ __html: String(data['text/html']) }} />
-        );
+        return <HtmlCellOutput html={String(data['text/html'])} />;
       }
       if (data['image/png']) {
         return (

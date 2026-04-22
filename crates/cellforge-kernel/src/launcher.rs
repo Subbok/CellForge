@@ -112,13 +112,234 @@ pub fn find_kernelspec(name: &str) -> Result<(PathBuf, KernelSpec)> {
     bail!("kernelspec '{name}' not found")
 }
 
+/// What the host's bubblewrap can actually achieve at runtime.
+/// Docker's default seccomp profile blocks `CLONE_NEWUSER`, which prevents
+/// bwrap from creating the user namespace it needs to drop uid/gid.
+/// Probing at first use keeps the server working across the full range
+/// of hosts (unprivileged Docker → full VM with user-ns enabled) without
+/// forcing operators to pick a sandbox mode themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SandboxCaps {
+    /// No bwrap binary, probe failed, or operator disabled via env — caller runs raw argv.
+    None,
+    /// bwrap works but user namespaces are blocked (typical Docker default).
+    /// Kernel stays as the server uid, but filesystem isolation
+    /// (tmpfs over config_dir + ro-bind everything else) is intact.
+    FilesystemOnly,
+    /// Full sandbox: user namespace + uid/gid drop + filesystem isolation.
+    Full,
+}
+
+fn probe_sandbox_caps() -> SandboxCaps {
+    use std::process::{Command, Stdio};
+
+    const BWRAP: &str = "/usr/bin/bwrap";
+    if !std::path::Path::new(BWRAP).exists() {
+        return SandboxCaps::None;
+    }
+
+    // Full sandbox probe — user namespace + uid drop.
+    let full = Command::new(BWRAP)
+        .args([
+            "--unshare-user",
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--uid",
+            "1000",
+            "--gid",
+            "1000",
+            "--ro-bind",
+            "/",
+            "/",
+            "--proc",
+            "/proc",
+            "--",
+            "/bin/true",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if let Ok(s) = full
+        && s.success()
+    {
+        tracing::info!("kernel sandbox: full (user-ns + uid drop)");
+        return SandboxCaps::Full;
+    }
+
+    // Filesystem-only fallback — no uid drop, but tmpfs/ro-bind still work.
+    let fsonly = Command::new(BWRAP)
+        .args([
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--ro-bind",
+            "/",
+            "/",
+            "--proc",
+            "/proc",
+            "--",
+            "/bin/true",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if let Ok(s) = fsonly
+        && s.success()
+    {
+        tracing::warn!(
+            "kernel sandbox: filesystem-only (user-ns blocked — likely Docker default \
+             seccomp). Config dir is tmpfs-shadowed but kernel stays root. \
+             Run with `--security-opt seccomp=unconfined` for full isolation."
+        );
+        return SandboxCaps::FilesystemOnly;
+    }
+
+    tracing::warn!("kernel sandbox: bwrap probe failed in both modes — running unsandboxed");
+    SandboxCaps::None
+}
+
+fn sandbox_caps() -> SandboxCaps {
+    static CAPS: OnceLock<SandboxCaps> = OnceLock::new();
+    *CAPS.get_or_init(probe_sandbox_caps)
+}
+
+/// Build a bubblewrap command line that wraps the raw kernel argv in a
+/// per-kernel sandbox.
+///
+/// Two modes, auto-selected by a one-time probe at server startup:
+///
+/// - `Full` — unprivileged user namespace + dropped-to-uid-1000.
+/// - `FilesystemOnly` — PID/IPC/UTS namespaces + ro-bind / tmpfs overlays.
+///   Kernel stays as the server uid (required when user namespaces are
+///   blocked, e.g. Docker with default seccomp profile).
+///
+/// In both modes the layout is: read-only root fs,
+/// `/root/.config/cellforge` shadowed by an empty tmpfs so `jwt_secret`
+/// / `users.db` / other users' data become invisible to the kernel,
+/// and only the notebook workspace + the caller-provided pylibs
+/// re-exposed (pylibs read-only, workspace r/w).
+///
+/// Returns `Ok(None)` when sandboxing is disabled (by env var) or the
+/// `bwrap` binary isn't present — the caller runs the raw argv.
+/// Returns `Err` only when sandboxing was explicitly required
+/// (`CELLFORGE_KERNEL_SANDBOX=required`) but couldn't be set up.
+///
+/// Env knobs:
+///
+/// - `CELLFORGE_KERNEL_SANDBOX=auto` (default) — wrap if probe succeeds, else warn-and-run-raw.
+/// - `CELLFORGE_KERNEL_SANDBOX=off` — never wrap.
+/// - `CELLFORGE_KERNEL_SANDBOX=required` — wrap; hard-fail if probe fails.
+/// - `CELLFORGE_KERNEL_UID=1000` — uid to drop to inside the sandbox (Full mode only).
+fn build_sandbox_wrapper(
+    argv: &[String],
+    workspace: Option<&std::path::Path>,
+    extra_pylibs: &[PathBuf],
+    conn_file: &std::path::Path,
+) -> Result<Option<Vec<String>>> {
+    let mode = std::env::var("CELLFORGE_KERNEL_SANDBOX")
+        .unwrap_or_else(|_| "auto".into())
+        .to_lowercase();
+    if matches!(mode.as_str(), "off" | "none" | "0" | "false") {
+        return Ok(None);
+    }
+
+    const BWRAP_PATH: &str = "/usr/bin/bwrap";
+    let caps = sandbox_caps();
+    if caps == SandboxCaps::None {
+        if mode == "required" {
+            bail!(
+                "CELLFORGE_KERNEL_SANDBOX=required but bubblewrap probe failed — \
+                 install `bubblewrap` and/or run Docker with \
+                 `--security-opt seccomp=unconfined`"
+            );
+        }
+        tracing::debug!("sandbox disabled, running kernel raw");
+        return Ok(None);
+    }
+
+    let uid: u32 = std::env::var("CELLFORGE_KERNEL_UID")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1000);
+
+    let config_dir = cellforge_config::config_dir();
+
+    let mut args: Vec<String> = vec![BWRAP_PATH.into()];
+    // User namespace + uid drop — Full mode only. In FilesystemOnly mode
+    // (Docker default seccomp blocks CLONE_NEWUSER), we skip these two
+    // and the kernel keeps the server's uid. Filesystem isolation below
+    // is the load-bearing piece either way.
+    if caps == SandboxCaps::Full {
+        args.push("--unshare-user".into());
+        args.push("--uid".into());
+        args.push(uid.to_string());
+        args.push("--gid".into());
+        args.push(uid.to_string());
+    }
+    // PID/IPC/UTS namespaces work in both modes — they don't need
+    // CLONE_NEWUSER when the caller is already root inside Docker.
+    args.extend([
+        "--unshare-pid".into(),
+        "--unshare-ipc".into(),
+        "--unshare-uts".into(),
+        "--unshare-cgroup-try".into(),
+        "--die-with-parent".into(),
+        "--new-session".into(),
+        "--hostname".into(), "cellforge-kernel".into(),
+        // Base filesystem: everything read-only; masked over below.
+        "--ro-bind".into(), "/".into(), "/".into(),
+        "--dev".into(), "/dev".into(),
+        "--proc".into(), "/proc".into(),
+        "--tmpfs".into(), "/tmp".into(),
+        "--tmpfs".into(), "/var/tmp".into(),
+        "--tmpfs".into(), "/run".into(),
+        // Shadow the server's config dir so the kernel cannot read
+        // jwt_secret, users.db, settings.json, or other users' data.
+        "--tmpfs".into(), config_dir.display().to_string(),
+    ]);
+
+    // Re-expose built-in Python helpers (cellforge_ui, cellforge) read-only.
+    let builtin_pylib = cellforge_config::pylib_dir();
+    if builtin_pylib.is_dir() {
+        args.push("--ro-bind-try".into());
+        args.push(builtin_pylib.display().to_string());
+        args.push(builtin_pylib.display().to_string());
+    }
+
+    // Re-expose each caller-provided pylib (typically the user's own
+    // installed plugins) read-only. Other users' plugin dirs are NOT
+    // passed in, so the tmpfs shadow above keeps them invisible.
+    for p in extra_pylibs {
+        args.push("--ro-bind-try".into());
+        args.push(p.display().to_string());
+        args.push(p.display().to_string());
+    }
+
+    // Bind the connection-info file read-only. The kernel reads ports +
+    // HMAC key from this; without the bind the tmpfs on /tmp would hide it.
+    args.push("--ro-bind".into());
+    args.push(conn_file.display().to_string());
+    args.push(conn_file.display().to_string());
+
+    // Bind the workspace (notebook dir) read-write — this is the ONLY
+    // filesystem path the kernel can modify besides the ephemeral tmpfs.
+    if let Some(ws) = workspace {
+        args.push("--bind-try".into());
+        args.push(ws.display().to_string());
+        args.push(ws.display().to_string());
+    }
+
+    args.push("--".into());
+    args.extend(argv.iter().cloned());
+    Ok(Some(args))
+}
+
 /// Spawn a kernel process and return its connection info + child handle.
 /// This does the whole dance: pick ports, write connection file, launch subprocess.
-///
 /// `cwd` — working directory for the kernel process. Pass the notebook's
 /// parent directory so that `np.savez('x.npz')` and other relative-path
 /// writes land next to the .ipynb, not wherever the server was started.
-///
 /// Crucially, we set up the kernel's PATH and CONDA_PREFIX so that
 /// `!pip install` and `!conda install` inside notebook cells target the
 /// kernel's own environment, not whatever python is first in the user's shell.
@@ -173,8 +394,17 @@ pub async fn launch_kernel(
             .unwrap_or("system".into())
     );
 
-    let mut cmd = tokio::process::Command::new(&argv[0]);
-    cmd.args(&argv[1..]);
+    // Wrap in per-kernel bubblewrap sandbox when enabled.
+    // Falls back to the raw argv when disabled or unavailable.
+    let sandbox_wrapped = build_sandbox_wrapper(&argv, cwd, extra_pythonpath, &conn_file)?;
+    let final_argv: Vec<String> = sandbox_wrapped.unwrap_or_else(|| argv.clone());
+    let sandboxed = final_argv.first().map(|s| s.ends_with("/bwrap")).unwrap_or(false);
+    if sandboxed {
+        tracing::info!("kernel wrapped in bubblewrap sandbox (uid dropped)");
+    }
+
+    let mut cmd = tokio::process::Command::new(&final_argv[0]);
+    cmd.args(&final_argv[1..]);
     cmd.kill_on_drop(true);
 
     // Compose PYTHONPATH: built-in pylib first, then any extras the caller

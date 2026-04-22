@@ -26,7 +26,6 @@ fn main() -> Result<()> {
         notebook: None,
         no_update_check: false,
         hub: false,
-        idle_timeout: 30,
     };
 
     std::thread::spawn(move || {

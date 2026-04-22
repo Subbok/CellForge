@@ -15,6 +15,7 @@ mod tests;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
+use axum::http::HeaderMap;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -22,6 +23,31 @@ use std::sync::Arc;
 pub struct AppConfig {
     notebook_dir: String,
     initial_notebook: Option<String>,
+}
+
+/// Best-effort client identifier string for logging and rate-limit keying.
+/// Reads `X-Forwarded-For` ONLY when the operator has explicitly set
+/// `CELLFORGE_TRUST_XFF=1` — otherwise any request could spoof the header.
+/// The env-var opt-in assumes the operator has put a trusted proxy in front
+/// (Cloudflare Tunnel, nginx, Traefik) that strips client-supplied XFF and
+/// sets its own.
+/// Returns `"unknown"` when no trustworthy source is available — callers
+/// should treat that string as an opaque bucket (all "unknown" clients share
+/// one rate-limit slot, which is fine for a v1 implementation).
+pub fn client_ip(headers: &HeaderMap) -> String {
+    if std::env::var("CELLFORGE_TRUST_XFF")
+        .ok()
+        .as_deref()
+        == Some("1")
+        && let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
+        && let Some(first) = xff.split(',').next()
+    {
+        let trimmed = first.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    "unknown".to_string()
 }
 
 /// Resolve a user-supplied relative path against a base directory, rejecting

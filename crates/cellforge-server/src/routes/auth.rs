@@ -8,11 +8,22 @@ use std::sync::Arc;
 
 use crate::state::AppState;
 
-/// Detect whether the request came in over HTTPS. Prefers `X-Forwarded-Proto`
-/// (set by reverse proxies like nginx / Cloudflare / Traefik). When absent,
-/// assumes the connection is plain HTTP — safer to skip `Secure` than to set
-/// it and have browsers drop the cookie on a dev localhost setup.
+/// Detect whether the request came in over HTTPS. Order of checks:
+/// 1. `CELLFORGE_COOKIE_SECURE=1` env — force-on opt-in for deployments that
+///    know they're TLS-terminated but can't set `X-Forwarded-Proto` (e.g.
+///    some Cloudflare Tunnel setups).
+/// 2. `X-Forwarded-Proto` header — set by reverse proxies like nginx /
+///    Cloudflare / Traefik.
+/// 3. Otherwise assume plain HTTP. Safer to skip `Secure` than to set it and
+///    have browsers drop the cookie on a localhost dev setup.
 fn is_secure_request(headers: &HeaderMap) -> bool {
+    if std::env::var("CELLFORGE_COOKIE_SECURE")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        return true;
+    }
     headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
@@ -65,9 +76,39 @@ pub async fn login(
     headers: HeaderMap,
     Json(req): Json<LoginReq>,
 ) -> impl IntoResponse {
+    // Rate-limit key is (normalized username, client ip). Both components
+    // are cheap to compute and keep the counter keyed tightly enough that
+    // one attacker can't lock out every user by flooding with mixed
+    // usernames.
+    let rate_key = format!(
+        "{}:{}",
+        req.username.trim().to_lowercase(),
+        crate::routes::client_ip(&headers)
+    );
+
+    if let Some(retry_after) = state.check_login_rate(&rate_key) {
+        tracing::warn!(
+            "login rate-limited key={rate_key} retry_after={retry_after}s"
+        );
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, retry_after.to_string())],
+            Json(AuthResponse {
+                ok: false,
+                error: Some(format!(
+                    "too many failed attempts, retry in {retry_after}s"
+                )),
+                user: None,
+            }),
+        )
+            .into_response();
+    }
+
     match state.users.login(&req.username, &req.password) {
         Ok(user) => {
-            let token = jwt::create_token(&user.username).unwrap_or_default();
+            state.clear_login_rate(&rate_key);
+            let tv = state.users.user_token_version(&user.username);
+            let token = jwt::create_token_with_version(&user.username, tv).unwrap_or_default();
             let cookie = auth_cookie(&token, &headers);
 
             (
@@ -81,15 +122,18 @@ pub async fn login(
             )
                 .into_response()
         }
-        Err(e) => (
-            StatusCode::UNAUTHORIZED,
-            Json(AuthResponse {
-                ok: false,
-                error: Some(e.to_string()),
-                user: None,
-            }),
-        )
-            .into_response(),
+        Err(e) => {
+            state.record_login_failure(&rate_key);
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(AuthResponse {
+                    ok: false,
+                    error: Some(e.to_string()),
+                    user: None,
+                }),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -137,7 +181,9 @@ pub async fn register(
         Ok(user) => {
             if is_first {
                 // first user = self-registration, log them in
-                let token = jwt::create_token(&user.username).unwrap_or_default();
+                let tv = state.users.user_token_version(&user.username);
+                let token =
+                    jwt::create_token_with_version(&user.username, tv).unwrap_or_default();
                 let cookie = auth_cookie(&token, &headers);
                 return (
                     StatusCode::OK,
@@ -325,8 +371,23 @@ pub async fn change_password(
     }
 }
 
-/// Extract username from JWT cookie.
+/// Extract username from the JWT cookie.
+/// This is a JWT-only check — it does NOT consult the database for
+/// `is_disabled` or `token_version`. Full validation happens in the
+/// `active_user_check` middleware (see `lib.rs`), which fires once per
+/// request and rejects 401 when the account has been disabled or the
+/// token version is stale. Handlers call this to learn the claimed
+/// username after the middleware has already vetted the JWT envelope.
+/// Kept JWT-only (rather than taking `&AppState`) so it stays cheap in
+/// tight loops (e.g. WS message routing) and so existing handlers keep
+/// their signatures.
 pub fn extract_user(headers: &axum::http::HeaderMap) -> Option<String> {
+    extract_claims(headers).map(|c| c.sub)
+}
+
+/// Decode the full JWT claims payload. Used by the auth middleware to
+/// validate token_version against the DB without re-parsing the cookie.
+pub fn extract_claims(headers: &axum::http::HeaderMap) -> Option<jwt::Claims> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     let token = cookie_header
         .split(';')
@@ -334,5 +395,5 @@ pub fn extract_user(headers: &axum::http::HeaderMap) -> Option<String> {
         .find(|s| s.starts_with("cellforge_token="))?
         .strip_prefix("cellforge_token=")?;
 
-    jwt::verify_token(token).ok().map(|c| c.sub)
+    jwt::verify_token(token).ok()
 }

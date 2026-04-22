@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use parking_lot::Mutex;
 use rusqlite::Connection;
 use serde::Serialize;
+use std::sync::LazyLock;
 
 pub struct UserDb {
     conn: Mutex<Connection>,
@@ -16,6 +17,16 @@ pub struct User {
     pub is_admin: bool,
     pub created_at: String,
 }
+
+/// Bcrypt hash of a fixed dummy password at cost 12 — same cost factor used
+/// for real passwords in `register()` and `change_password()`. `login()` falls
+/// back to this when a username doesn't exist so `bcrypt::verify` runs on every
+/// attempt and timing stays constant between "user not found" and "user found,
+/// wrong password". Never accept this hash: the existence check in `login()`
+/// keeps it from authenticating.
+static DUMMY_HASH: LazyLock<String> = LazyLock::new(|| {
+    bcrypt::hash("cellforge-timing-dummy", 12).expect("bcrypt dummy hash generation")
+});
 
 impl UserDb {
     pub fn open() -> Result<Self> {
@@ -33,6 +44,11 @@ impl UserDb {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
 
         Self::run_migrations(&conn)?;
+
+        // Warm the dummy bcrypt hash used by `login()` so the first
+        // "user not found" attempt doesn't leak a timing anomaly through
+        // LazyLock's one-shot init.
+        let _ = &*DUMMY_HASH;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -74,10 +90,40 @@ impl UserDb {
             }
         }
 
-        // Future migrations:
-        // if version < 2 {
-        //     conn.execute_batch("ALTER TABLE ... ; PRAGMA user_version = 2;")?;
-        // }
+        // Migration 2 — add `is_disabled` column so admin deactivation
+        // actually has a flag to flip. Distinct from
+        // `is_active` (which doubles as "seen the dashboard" indicator).
+        if version < 2 {
+            let _ = conn.execute_batch(
+                "ALTER TABLE users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0",
+            );
+            conn.execute_batch("PRAGMA user_version = 2;")?;
+        }
+
+        // Migration 3 — token version for JWT invalidation on password change,
+        // deactivation, and admin-role demotion.
+        if version < 3 {
+            let _ = conn.execute_batch(
+                "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
+            );
+            conn.execute_batch("PRAGMA user_version = 3;")?;
+        }
+
+        // Migration 4 — deduplicate `shared_files` and enforce a UNIQUE
+        // constraint on (from_user, to_user, file_name). Old `share_file`
+        // inserted a new row on every call, so sharing the same notebook
+        // twice produced duplicates on the recipient's dashboard.
+        if version < 4 {
+            conn.execute_batch(
+                "DELETE FROM shared_files WHERE id NOT IN (
+                     SELECT MIN(id) FROM shared_files
+                     GROUP BY from_user, to_user, file_name
+                 );
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_shared_files_unique
+                     ON shared_files(from_user, to_user, file_name);
+                 PRAGMA user_version = 4;",
+            )?;
+        }
 
         Ok(())
     }
@@ -97,7 +143,9 @@ impl UserDb {
                 max_memory_mb INTEGER NOT NULL DEFAULT 0,
                 group_name TEXT NOT NULL DEFAULT '',
                 last_active DATETIME DEFAULT NULL,
-                is_active INTEGER NOT NULL DEFAULT 0
+                is_active INTEGER NOT NULL DEFAULT 0,
+                is_disabled INTEGER NOT NULL DEFAULT 0,
+                token_version INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS groups (
@@ -188,14 +236,17 @@ impl UserDb {
 
     pub fn login(&self, username: &str, password: &str) -> Result<User> {
         let username = username.trim().to_lowercase();
-        let conn = self.conn.lock();
 
-        let mut stmt = conn.prepare(
-            "SELECT id, username, password_hash, display_name, workspace_dir, is_admin, created_at FROM users WHERE username = ?1"
-        )?;
-
-        let row = stmt
-            .query_row(rusqlite::params![username], |row| {
+        // Look up the row under the DB lock, then drop the lock before running
+        // bcrypt (100-300ms of pure CPU). Keeping verify outside the lock also
+        // lets concurrent readers proceed during a login storm.
+        type Row = (i64, String, String, String, String, i32, String);
+        let row: Option<Row> = {
+            let conn = self.conn.lock();
+            let mut stmt = conn.prepare(
+                "SELECT id, username, password_hash, display_name, workspace_dir, is_admin, created_at FROM users WHERE username = ?1"
+            )?;
+            stmt.query_row(rusqlite::params![username], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
@@ -206,25 +257,42 @@ impl UserDb {
                     row.get::<_, String>(6)?,
                 ))
             })
-            .map_err(|_| anyhow::anyhow!("invalid username or password"))?;
+            .ok()
+        };
 
-        let (id, username, hash, display_name, workspace_dir, is_admin, created_at) = row;
+        // Always run bcrypt::verify — fall back to DUMMY_HASH when the user
+        // doesn't exist so both branches pay the same cost-12 cost. This closes
+        // the username-enumeration timing side-channel.
+        let hash_to_verify: &str = row
+            .as_ref()
+            .map(|r| r.2.as_str())
+            .unwrap_or_else(|| DUMMY_HASH.as_str());
 
-        if !bcrypt::verify(password, &hash).unwrap_or(false) {
-            bail!("invalid username or password");
+        let verified = bcrypt::verify(password, hash_to_verify).unwrap_or(false);
+
+        // Only accept when BOTH the row existed AND bcrypt verified. A success
+        // requires a real row, so the dummy hash can never authenticate even
+        // if an attacker somehow supplies the dummy plaintext.
+        match row {
+            Some((id, uname, _hash, display_name, workspace_dir, is_admin, created_at))
+                if verified =>
+            {
+                Ok(User {
+                    id,
+                    username: uname,
+                    display_name,
+                    workspace_dir,
+                    is_admin: is_admin != 0,
+                    created_at,
+                })
+            }
+            _ => bail!("invalid username or password"),
         }
-
-        Ok(User {
-            id,
-            username,
-            display_name,
-            workspace_dir,
-            is_admin: is_admin != 0,
-            created_at,
-        })
     }
 
     /// Change a user's password. Caller must verify authorization (self or admin).
+    /// Bumps token_version in the same write so every outstanding JWT for the
+    /// user is rejected on next use.
     pub fn change_password(&self, username: &str, new_password: &str) -> Result<()> {
         if new_password.len() < 8 {
             bail!("password must be at least 8 characters");
@@ -234,7 +302,9 @@ impl UserDb {
         let hash = bcrypt::hash(new_password, 12).context("hashing password")?;
         let conn = self.conn.lock();
         let rows = conn.execute(
-            "UPDATE users SET password_hash = ?1 WHERE username = ?2",
+            "UPDATE users
+             SET password_hash = ?1, token_version = token_version + 1
+             WHERE username = ?2",
             rusqlite::params![hash, username.trim().to_lowercase()],
         )?;
         if rows == 0 {
@@ -380,7 +450,11 @@ impl UserDb {
 
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT INTO shared_files (from_user, to_user, file_name, file_path) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO shared_files (from_user, to_user, file_name, file_path)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(from_user, to_user, file_name)
+             DO UPDATE SET file_path = excluded.file_path,
+                           shared_at = CURRENT_TIMESTAMP",
             rusqlite::params![from, to, file_name, dest.to_string_lossy().to_string()],
         )?;
         Ok(())
@@ -398,6 +472,28 @@ impl UserDb {
                 from_user: row.get(1)?,
                 file_name: row.get(2)?,
                 shared_at: row.get(3)?,
+            })
+        })
+        .unwrap()
+        .flatten()
+        .collect()
+    }
+
+    /// List outbound shares of a specific file owned by `from_user`.
+    /// Used by the share dialog to show who a file is already shared with.
+    pub fn shares_by_me_of(&self, from_user: &str, file_name: &str) -> Vec<OutboundShare> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, to_user FROM shared_files
+                 WHERE from_user = ?1 AND file_name = ?2
+                 ORDER BY to_user",
+            )
+            .unwrap();
+        stmt.query_map(rusqlite::params![from_user, file_name], |row| {
+            Ok(OutboundShare {
+                id: row.get(0)?,
+                to_user: row.get(1)?,
             })
         })
         .unwrap()
@@ -629,6 +725,77 @@ impl UserDb {
         .unwrap_or(false)
     }
 
+    /// Mark the account disabled — cannot authenticate until re-enabled.
+    /// Also bumps `token_version` so any outstanding JWTs are rejected on
+    /// next use.
+    pub fn deactivate_user(&self, username: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        let rows = conn.execute(
+            "UPDATE users
+             SET is_disabled = 1, token_version = token_version + 1
+             WHERE username = ?1",
+            rusqlite::params![username],
+        )?;
+        if rows == 0 {
+            bail!("user not found");
+        }
+        Ok(())
+    }
+
+    /// Reverse a previous deactivation. Does not bump token_version —
+    /// re-enabling an account shouldn't retroactively un-revoke its old
+    /// sessions (they should have been rejected while disabled, and a
+    /// password change or explicit logout already owns that invariant).
+    pub fn reactivate_user(&self, username: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        let rows = conn.execute(
+            "UPDATE users SET is_disabled = 0 WHERE username = ?1",
+            rusqlite::params![username],
+        )?;
+        if rows == 0 {
+            bail!("user not found");
+        }
+        Ok(())
+    }
+
+    pub fn user_is_disabled(&self, username: &str) -> bool {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT is_disabled FROM users WHERE username = ?1",
+            rusqlite::params![username],
+            |row| row.get::<_, i32>(0),
+        )
+        .map(|v| v != 0)
+        .unwrap_or(false)
+    }
+
+    /// Current token_version for JWT invalidation checks. Defaults to 0
+    /// for accounts predating the token_version migration.
+    pub fn user_token_version(&self, username: &str) -> i64 {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT token_version FROM users WHERE username = ?1",
+            rusqlite::params![username],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// Bump token_version — invalidates every outstanding JWT for this
+    /// user. Called internally by `deactivate_user` and should be called
+    /// explicitly on password change and role demotion.
+    pub fn bump_token_version(&self, username: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        let rows = conn.execute(
+            "UPDATE users SET token_version = token_version + 1 WHERE username = ?1",
+            rusqlite::params![username],
+        )?;
+        if rows == 0 {
+            bail!("user not found");
+        }
+        Ok(())
+    }
+
     // ── Hub: kernel sessions ─────────────────────────────────────────
 
     pub fn register_kernel_session(
@@ -742,6 +909,14 @@ pub struct SharedFile {
     pub from_user: String,
     pub file_name: String,
     pub shared_at: String,
+}
+
+/// Row returned by `shares_by_me_of` — the minimal view the share dialog
+/// needs to render an "already shared with" list with unshare buttons.
+#[derive(Debug, Clone, Serialize)]
+pub struct OutboundShare {
+    pub id: i64,
+    pub to_user: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

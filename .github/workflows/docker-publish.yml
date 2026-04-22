@@ -40,6 +40,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # id-token: write is required for cosign keyless signing via
+      # GitHub's OIDC provider.
+      id-token: write
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       docker_tag: ${{ steps.resolve.outputs.docker_tag }}
@@ -72,7 +75,6 @@ jobs:
       # - workflow_dispatch → inputs.tag
       # - workflow_run (po Release na tag pushu) → workflow_run.head_branch
       # - schedule / push main → query latest release via gh CLI
-      #
       # Outputs:
       #   tag        = tag release literal (np. v0.5.0) — używany w URL do binarki
       #   docker_tag = stripped v (np. 0.5.0) — używany jako docker image tag,
@@ -82,14 +84,19 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          # Wrap user-controllable inputs in env vars so the shell sees them as
+          # $VAR (not GHA expression-expanded literals) — avoids script injection
+          # even though workflow_dispatch + workflow_run are restricted triggers.
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          WF_EVENT: ${{ github.event.workflow_run.event }}
+          WF_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          elif [ "${{ github.event.workflow_run.event }}" = "push" ] && \
-               [[ "${{ github.event.workflow_run.head_branch }}" == v* ]]; then
-            TAG="${{ github.event.workflow_run.head_branch }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "$WF_EVENT" = "push" ] && [[ "$WF_HEAD_BRANCH" == v* ]]; then
+            TAG="$WF_HEAD_BRANCH"
           else
-            TAG=$(gh release view --json tagName -q .tagName --repo ${{ github.repository }})
+            TAG=$(gh release view --json tagName -q .tagName --repo "${{ github.repository }}")
           fi
           if [ -z "$TAG" ]; then
             echo "Could not resolve a CellForge release tag" >&2
@@ -112,6 +119,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push (lean)
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -125,12 +133,25 @@ jobs:
           cache-from: type=gha,scope=lean
           cache-to: type=gha,scope=lean,mode=max
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign lean image (keyless via OIDC)
+        # Signs by digest so all tags (semver + latest) that point at this
+        # build share a single signature. `--yes` suppresses the interactive
+        # Fulcio-cert prompt (OIDC identity is implicit in CI).
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "${{ env.REGISTRY }}/${{ env.LEAN_IMAGE }}@${DIGEST}"
+
   ai:
     needs: lean
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -163,6 +184,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push (ai)
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -176,3 +198,12 @@ jobs:
             CELLFORGE_VERSION=${{ needs.lean.outputs.docker_tag }}
           cache-from: type=gha,scope=ai
           cache-to: type=gha,scope=ai,mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign ai image (keyless via OIDC)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "${{ env.REGISTRY }}/${{ env.AI_IMAGE }}@${DIGEST}"

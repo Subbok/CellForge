@@ -261,7 +261,7 @@ pub async fn share_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(req): Json<ShareReq>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<impl IntoResponse, StatusCode> {
     let from = auth::extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let dir = user_notebook_dir(&state, &headers);
     let src = safe_resolve(&dir, &req.file_path)?;
@@ -288,7 +288,7 @@ pub async fn share_file(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(StatusCode::OK)
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// List files shared with current user.
@@ -298,6 +298,23 @@ pub async fn shared_files(
 ) -> impl IntoResponse {
     let username = auth::extract_user(&headers).unwrap_or_default();
     Json(state.users.shared_with(&username))
+}
+
+/// GET /api/files/shares-by-me?file_name=foo.ipynb — list users this user
+/// has shared the given file with. Used by the share dialog to render
+/// the "already shared with" list with unshare buttons.
+#[derive(Deserialize)]
+pub struct SharesByMeQuery {
+    file_name: String,
+}
+
+pub async fn shares_by_me(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Query(q): axum::extract::Query<SharesByMeQuery>,
+) -> impl IntoResponse {
+    let from = auth::extract_user(&headers).unwrap_or_default();
+    Json(state.users.shares_by_me_of(&from, &q.file_name))
 }
 
 /// Remove a share.
@@ -310,13 +327,13 @@ pub async fn unshare_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(req): Json<UnshareReq>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<impl IntoResponse, StatusCode> {
     let _username = auth::extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     state
         .users
         .unshare_file(req.share_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(StatusCode::OK)
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// List all users (for share picker).

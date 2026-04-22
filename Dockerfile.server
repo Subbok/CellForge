@@ -1,10 +1,19 @@
 # CellForge — lean notebook server (Python 3.12, no DL frameworks)
-#
+# Multi-stage build: the builder stage has the compiler
+# toolchain, uv, and curl for installing packages and downloading the
+# release binary. The runtime stage is minimal (python3.12-venv +
+# ca-certificates) and copies over only the precompiled venv + server
+# binary + kernelspec — no gcc, build-essential, git, curl, or apt-get
+# for user-executed notebook code to exploit.
+# Python packages come from `server-requirements.lock` with `--require-hashes`
+# so image rebuilds are reproducible and a compromised
+# PyPI upload can't silently land in the next rebuild.
+# Release binary is SHA256-verified against SHA256SUMS published alongside
+# the release.
 # CELLFORGE_VERSION must match a published GitHub release tag (e.g. v0.5.0).
 # There is no default: CI sets it from steps.resolve.outputs.tag, and local
 # builds are forced to pass it explicitly so no one silently pulls a stale
 # binary after a release bump.
-#
 # Build (amd64):
 #   docker build -f Dockerfile.server --build-arg CELLFORGE_VERSION=v0.5.0 \
 #     -t cellforge-server .
@@ -12,48 +21,88 @@
 #   docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.server \
 #     --build-arg CELLFORGE_VERSION=v0.5.0 -t cellforge-server .
 # Run: docker run -p 8888:8888 -v $PWD:/data cellforge-server
-#
 # For GPU + PyTorch + TensorFlow, see Dockerfile.server-ai.
 
-FROM ubuntu:24.04
+# ─── Stage 1: Builder ──────────────────────────────────────────────────
+FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG CELLFORGE_VERSION
 ARG TARGETARCH
 
-# System deps (stable layer)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.12 python3.12-venv python3-pip \
-      git curl ca-certificates build-essential \
+      curl ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # uv — fast pip replacement
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Scientific and data-analysis stack at system level.
-# PEP 668 is overridden because we own this container.
-RUN uv pip install --system --break-system-packages \
-      ipykernel numpy scipy matplotlib pandas scikit-learn \
-      ipywidgets rich tqdm pillow jupyter-client \
-      polars pyarrow duckdb plotly seaborn openpyxl statsmodels \
-      sympy networkx pytest black ruff requests httpx \
-    && python3 -m ipykernel install --name python3 \
-       --display-name "Python 3.12 (CPU)"
+# Install the scientific / data-analysis stack into an isolated venv at
+# /opt/venv using a hash-verified lockfile.
+COPY server-requirements.lock /tmp/server-requirements.lock
+RUN uv venv --python=3.12 /opt/venv \
+ && uv pip install --python /opt/venv/bin/python \
+      -r /tmp/server-requirements.lock --require-hashes
 
-# Server binary — this layer is the only one invalidated by release bumps.
-# curl retries with --retry-all-errors so transient 5xx from github.com
-# (we've seen 504 gateway timeouts) don't fail the build outright.
+# Register the kernelspec under /usr/local/share/jupyter so cellforge-server
+# discovers it. `--prefix=/usr/local` places the spec at a system path while
+# `argv` points at /opt/venv/bin/python so the kernel sees the pinned stack.
+RUN /opt/venv/bin/python -m ipykernel install \
+      --prefix=/usr/local \
+      --name python3 \
+      --display-name "Python 3.12 (CPU)"
+
+# Server binary — curl retries with --retry-all-errors so transient 5xx
+# from github.com don't fail the build outright. SHA256-verified against
+# SHA256SUMS published alongside the release.
 RUN case "$TARGETARCH" in \
         amd64) ARCH=x64 ;; \
         arm64) ARCH=arm64 ;; \
         *) echo "unsupported arch: $TARGETARCH" >&2; exit 1 ;; \
     esac \
+ && cd /tmp \
  && curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL \
-      -o /usr/local/bin/cellforge-server \
+      -o "cellforge-linux-${ARCH}" \
       "https://github.com/Subbok/CellForge/releases/download/${CELLFORGE_VERSION}/cellforge-linux-${ARCH}" \
+ && curl --retry 5 --retry-delay 3 --retry-all-errors -fsSL \
+      -o SHA256SUMS \
+      "https://github.com/Subbok/CellForge/releases/download/${CELLFORGE_VERSION}/SHA256SUMS" \
+ && grep " cellforge-linux-${ARCH}$" SHA256SUMS | sha256sum -c - \
+ && mv "cellforge-linux-${ARCH}" /usr/local/bin/cellforge-server \
  && chmod +x /usr/local/bin/cellforge-server
+
+# ─── Stage 2: Runtime ──────────────────────────────────────────────────
+# Minimal runtime — no compiler, no curl, no git, no apt-get wrappers
+# accessible to the kernel process by default.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# bubblewrap + unprivileged uid 1000 for per-kernel sandboxing.
+# The sandbox drops to this uid so a kernel cell cannot read the
+# server's users.db / jwt_secret even if the kernel escalates within its
+# own namespace. See cellforge-kernel/src/launcher.rs::build_sandbox_wrapper.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.12 python3.12-venv \
+      ca-certificates \
+      bubblewrap \
+    && rm -rf /var/lib/apt/lists/* \
+    && (userdel -r ubuntu 2>/dev/null || true) \
+    && groupadd -g 1000 cellforge-kernel \
+    && useradd -u 1000 -g 1000 -s /usr/sbin/nologin -M cellforge-kernel
+
+# Bring in the precompiled venv + kernelspec + server binary from builder.
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /usr/local/share/jupyter /usr/local/share/jupyter
+COPY --from=builder /usr/local/bin/cellforge-server /usr/local/bin/cellforge-server
+
+# Activate the venv by default — `python` resolves to /opt/venv/bin/python
+# with the pinned scientific stack. Kernel processes inherit this env.
+ENV PATH="/opt/venv/bin:${PATH}"
+ENV VIRTUAL_ENV="/opt/venv"
 
 EXPOSE 8888
 WORKDIR /data

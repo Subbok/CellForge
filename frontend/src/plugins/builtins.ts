@@ -1,6 +1,5 @@
 /**
  * Built-in MIME renderers that ship with CellForge itself (not from plugins).
- *
  * Called once at startup from App.tsx. Adds handlers to the same registry
  * that user-installed plugins write to, so CellOutput treats them identically.
  */
@@ -129,7 +128,41 @@ const PALETTE = [
 ];
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Runtime sanitizer for viz data. TypeScript types are erased at runtime,
+ * so a notebook cell that emits `{"kind":"bar","values":["<script>…"]}`
+ * bypasses the compile-time `number[]` contract. This coerces the two
+ * array fields that get interpolated raw into SVG (`${v}` in text nodes)
+ * to finite numbers, and labels/strings to real strings. After this call,
+ * render* functions can trust their inputs are the declared shapes.
+ * Returns null when the data is unrecognizable.
+ */
+function sanitizeViz(data: unknown): VizData | null {
+  if (!data || typeof data !== 'object' || typeof (data as { kind?: unknown }).kind !== 'string') {
+    return null;
+  }
+  const out: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+
+  if ('values' in out) {
+    const vs = Array.isArray(out.values) ? out.values : [];
+    out.values = vs
+      .map((v: unknown) => (typeof v === 'number' ? v : Number(v)))
+      .filter((n: number) => Number.isFinite(n));
+  }
+  if ('labels' in out) {
+    const ls = Array.isArray(out.labels) ? out.labels : [];
+    out.labels = ls.map((l: unknown) => (l == null ? '' : String(l)));
+  }
+
+  return out as unknown as VizData;
 }
 
 /** Base widths per chart type. scale=1.0 maps to this %, scale=2.0 doubles it. No cap. */
@@ -438,16 +471,29 @@ export function registerBuiltinRenderers() {
         svgEl.style.height = 'auto';
       }
     } catch (err: unknown) {
+      // Error messages and source text can contain < / > / " from user
+      // content — use textContent + DOM construction instead of string
+      // interpolation into innerHTML.
       const message = err instanceof Error ? err.message : String(err);
-      container.innerHTML = `<pre style="color:#f87171;font-size:12px;">Mermaid error: ${
-        message
-      }\n\nSource:\n${d.source}</pre>`;
+      container.replaceChildren();
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'color:#f87171;font-size:12px;';
+      pre.textContent = `Mermaid error: ${message}\n\nSource:\n${d.source}`;
+      container.appendChild(pre);
     }
   });
 
   // CellForge visualizations — one MIME type, dispatched by `kind`
   registerMimeRenderer('application/vnd.cellforge.viz', (container, data) => {
-    const d = data as VizData;
+    const d = sanitizeViz(data);
+    if (!d) {
+      container.replaceChildren();
+      const warn = document.createElement('div');
+      warn.style.cssText = 'color:var(--color-text-muted);font-size:12px;';
+      warn.textContent = 'Invalid viz data';
+      container.appendChild(warn);
+      return;
+    }
     switch (d.kind) {
       case 'bar':      renderBar(container, d); break;
       case 'line':     renderLine(container, d); break;
@@ -457,8 +503,17 @@ export function registerBuiltinRenderers() {
       case 'callout':  renderCallout(container, d); break;
       case 'progress': renderProgress(container, d); break;
       case 'diagram':  renderDiagram(container, d); break;
-      default:
-        container.innerHTML = `<div style="color:var(--color-text-muted);font-size:12px;">Unknown viz kind: ${(d as VizBase).kind}</div>`;
+      default: {
+        // TS narrows `d` to `never` after all VizData variants are handled,
+        // but a malicious/unknown payload can still reach here at runtime.
+        // Cast through VizBase to read the string for the warning.
+        const unknownKind = (d as VizBase).kind;
+        container.replaceChildren();
+        const warn = document.createElement('div');
+        warn.style.cssText = 'color:var(--color-text-muted);font-size:12px;';
+        warn.textContent = `Unknown viz kind: ${unknownKind}`;
+        container.appendChild(warn);
+      }
     }
   });
 }

@@ -97,8 +97,13 @@ fn allowed_origins() -> &'static [String] {
                 .filter(|o| !o.is_empty())
                 .collect(),
             _ => vec![
+                // Vite dev server — `scripts/dev.sh` runs the frontend on :3000
+                // (port pinned in frontend/vite.config.ts); :5173 is the vite
+                // default for anyone overriding the config.
+                "http://localhost:3000".into(),
                 "http://localhost:5173".into(),
                 "http://localhost:8888".into(),
+                "http://127.0.0.1:3000".into(),
                 "http://127.0.0.1:5173".into(),
                 "http://127.0.0.1:8888".into(),
             ],
@@ -106,10 +111,48 @@ fn allowed_origins() -> &'static [String] {
         .as_slice()
 }
 
+/// Middleware: reject requests whose JWT belongs to a disabled account or
+/// to an account whose token_version has been bumped (password change,
+/// deactivation, admin-role demotion). Runs on every request — unauth'd
+/// requests pass through without a DB lookup.
+async fn active_user_check(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Some(claims) = crate::routes::auth::extract_claims(req.headers()) {
+        let name = &claims.sub;
+        if state.users.user_is_disabled(name) {
+            return (
+                axum::http::StatusCode::UNAUTHORIZED,
+                "account disabled",
+            )
+                .into_response();
+        }
+        let current_tv = state.users.user_token_version(name);
+        if claims.tv < current_tv {
+            return (
+                axum::http::StatusCode::UNAUTHORIZED,
+                "session invalidated — please log in again",
+            )
+                .into_response();
+        }
+    }
+    next.run(req).await
+}
+
 /// Origin-header check middleware. State-changing requests (POST/PUT/DELETE/PATCH)
-/// must come from one of the allowed origins. Combined with SameSite=Strict cookies
-/// this blocks CSRF without needing an explicit token scheme. GET is allowed
-/// without an Origin check (browsers don't always send Origin on same-site GETs).
+/// must either (a) be same-origin with the server (Origin's host:port matches
+/// the request's `Host` header) OR (b) come from one of the configured
+/// allowed origins. Combined with SameSite=Strict cookies this blocks CSRF
+/// without needing an explicit token scheme. GET is allowed without an
+/// Origin check (browsers don't always send Origin on same-site GETs).
+/// Same-origin auto-allow covers the desktop app (binds a random port) and
+/// custom-port Docker deployments without requiring operators to set
+/// `CELLFORGE_ALLOWED_ORIGINS` per-port. An attacker on a different host
+/// cannot forge a matching `Host` header — browsers set Host to the URL
+/// they're fetching, which is controlled by the attacker's own script.
 async fn origin_check(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
@@ -122,10 +165,24 @@ async fn origin_check(
     );
     if is_state_changing {
         let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
+        let host = req.headers().get("host").and_then(|v| v.to_str().ok());
         let allowed = match origin {
             Some(o) => {
-                let lo = o.to_lowercase();
-                allowed_origins().iter().any(|a| a == &lo)
+                // Strip scheme from Origin to get host:port; compare to Host
+                // header case-insensitively (RFC 3986: host is case-insensitive).
+                let origin_hostport = o
+                    .split_once("://")
+                    .map(|(_, rest)| rest)
+                    .unwrap_or(o);
+                let same_origin = host
+                    .map(|h| origin_hostport.eq_ignore_ascii_case(h))
+                    .unwrap_or(false);
+                if same_origin {
+                    true
+                } else {
+                    let lo = o.to_lowercase();
+                    allowed_origins().iter().any(|a| a == &lo)
+                }
             }
             // Missing Origin header on a state-changing request — this happens
             // for server-side tools (curl, tests) but browsers always send it
@@ -209,6 +266,7 @@ fn build_api_router() -> Router<Arc<AppState>> {
         .route("/files/share", axum::routing::post(fileops::share_file))
         .route("/files/unshare", axum::routing::post(fileops::unshare_file))
         .route("/files/shared", get(fileops::shared_files))
+        .route("/files/shares-by-me", get(fileops::shares_by_me))
         .route("/files/share-users", get(fileops::share_users))
         .route("/files", get(files::list_root))
         .route("/files/{*path}", get(files::list))
@@ -273,20 +331,6 @@ fn build_api_router() -> Router<Arc<AppState>> {
 
 /// Start the CellForge server on the given listener with the provided config.
 pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> anyhow::Result<()> {
-    if config.hub {
-        eprintln!("╔══════════════════════════════════════════════════════════════════╗");
-        eprintln!("║  SECURITY WARNING                                                ║");
-        eprintln!("║                                                                  ║");
-        eprintln!("║  Hub mode is enabled but kernel isolation is NOT implemented.    ║");
-        eprintln!("║  All user kernels run as the same OS user as the server.         ║");
-        eprintln!("║  Any authenticated user can read the server's files, including   ║");
-        eprintln!("║  other users' notebooks and the auth database.                   ║");
-        eprintln!("║                                                                  ║");
-        eprintln!("║  DO NOT use hub mode for untrusted users.                        ║");
-        eprintln!("║  Full isolation planned for v1.1 (bubblewrap / docker).          ║");
-        eprintln!("╚══════════════════════════════════════════════════════════════════╝");
-    }
-
     let state = Arc::new(AppState::new(&config));
 
     // non-blocking update check
@@ -322,6 +366,12 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
                     .unwrap_or(false);
                 if still_idle && km.stop(&id).await.is_ok() {
                     killed += 1;
+                    // Drop the kernel_sessions row so dashboard queries
+                    // don't keep showing the dead kernel. WS handler does
+                    // this on the normal close path; the reaper needs to
+                    // do it too for kernels that went idle without a
+                    // clean disconnect.
+                    let _ = app_state.users.remove_kernel_session(&id);
                 }
             }
             if killed > 0 {
@@ -382,9 +432,22 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
             axum::http::header::AUTHORIZATION,
         ]);
 
+    // Raise the axum default body limit (2 MiB) to match the notebook-size
+    // cap in cellforge-notebook::io::MAX_NOTEBOOK_SIZE. Anything bigger is
+    // rejected at the HTTP layer before hitting the JSON extractor, and
+    // read_notebook stat-checks the on-disk size on its own path
+    //. Plugin uploads stay tighter
+    let body_limit =
+        axum::extract::DefaultBodyLimit::max(cellforge_notebook::io::MAX_NOTEBOOK_SIZE as usize);
+
     let app = app
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            active_user_check,
+        ))
         .layer(axum::middleware::from_fn(origin_check))
         .layer(cors)
+        .layer(body_limit)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

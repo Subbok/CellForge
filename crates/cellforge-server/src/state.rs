@@ -3,27 +3,22 @@ use crate::plugins::{PluginSettings, load_plugin_settings};
 use crate::ws::collab::CollabState;
 use cellforge_auth::db::UserDb;
 use cellforge_kernel::manager::KernelManager;
-use parking_lot::RwLock;
+use parking_lot::{Mutex as PlMutex, RwLock};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, broadcast};
 
-/// Build the composite key used for `AppState.notebook_kernels`.
-///
-/// Previously this map was keyed purely by the notebook's path relative to
-/// the user workspace. Because every user has the same workspace layout,
-/// user A opening `Untitled.ipynb` would collide with user B opening the
-/// same-named file and attach them to the same kernel (cross-user kernel
-/// hijack). Namespacing the key with the username keeps per-user kernels
-/// isolated.
-///
-/// Unauthenticated callers fall back to `"anonymous"` in call sites, though
-/// the WS handler currently rejects unauthenticated connections entirely —
-/// the fallback exists only to avoid accidental collision if that guard is
-/// ever relaxed.
-pub fn notebook_kernel_key(username: &str, notebook_path: &str) -> String {
-    format!("{username}::{notebook_path}")
+/// Notebook-scoped runtime events. Each active session for a given notebook
+/// (canonical path) subscribes to a broadcast channel and reacts to these.
+/// Today the only event is `KernelStarted`, which lets all collaborators on
+/// the notebook auto-join a kernel that another collaborator just spawned
+/// (e.g. user A runs the first R cell → user B's session subscribes to
+/// that R kernel so the UI shows the new language and incoming iopub).
+#[derive(Debug, Clone)]
+pub enum NotebookEvent {
+    KernelStarted { language: String, kernel_id: String },
 }
 
 pub struct AppState {
@@ -31,19 +26,42 @@ pub struct AppState {
     pub initial_notebook: Option<PathBuf>,
     pub sessions: RwLock<HashMap<String, SessionInfo>>,
     pub kernels: Mutex<KernelManager>,
-    /// `"{username}::{notebook_path}" -> kernel_id`. Built via
-    /// [`notebook_kernel_key`] — never key by the raw notebook path alone,
-    /// that allows cross-user kernel hijack.
-    pub notebook_kernels: Mutex<HashMap<String, String>>,
+    /// Shared kernels per (notebook, language). Outer key is the notebook's
+    /// canonical absolute path; inner key is the kernel language (e.g.
+    /// `"python"`, `"r"`, `"julia"`). Two users with access to the same
+    /// underlying file resolve to the same outer key, and a cell in any
+    /// language triggers reuse of the existing kernel for that language so
+    /// every collaborator sees the same execution state, iopub stream, and
+    /// variable namespace. Access is enforced at insert time by
+    /// `safe_resolve`, which rejects paths outside the caller's workspace.
+    pub notebook_kernels: Mutex<HashMap<String, HashMap<String, String>>>,
+    /// One broadcast channel per notebook (canonical path). Sessions
+    /// subscribe on connect; kernel spawns emit `KernelStarted` so every
+    /// collaborator auto-joins the new language kernel. Created lazily on
+    /// first subscribe or send.
+    pub notebook_events: Mutex<HashMap<String, broadcast::Sender<NotebookEvent>>>,
     pub users: UserDb,
     pub collab: Arc<CollabState>,
     /// Global plugin settings loaded from ~/.config/cellforge/settings.json,
     /// mutable via admin route POST /api/plugins/config.
     pub plugin_settings: RwLock<PluginSettings>,
     pub hub_mode: bool,
-    #[allow(dead_code)] // will be used for hub idle reaper
-    pub idle_timeout_mins: u64,
+    /// Failed-login counter keyed on `"{username}:{client_ip}"`. Cheap in-memory
+    /// counter — see `check_login_rate` / `record_login_failure`.
+    pub login_limiter: PlMutex<HashMap<String, LoginAttempts>>,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct LoginAttempts {
+    pub count: u32,
+    pub window_start: Instant,
+}
+
+/// Per-(username, ip) login attempt limits. 5 failures per 15 minutes before
+/// we start returning 429. A successful login clears the counter for that key.
+pub const LOGIN_MAX_ATTEMPTS: u32 = 5;
+pub const LOGIN_WINDOW: Duration = Duration::from_secs(15 * 60);
+const LOGIN_LIMITER_MAX_ENTRIES: usize = 10_000;
 
 pub struct SessionInfo {
     pub id: String,
@@ -67,11 +85,66 @@ impl AppState {
             sessions: RwLock::new(HashMap::new()),
             kernels: Mutex::new(KernelManager::new()),
             notebook_kernels: Mutex::new(HashMap::new()),
+            notebook_events: Mutex::new(HashMap::new()),
             users,
             collab: Arc::new(CollabState::new()),
             plugin_settings: RwLock::new(load_plugin_settings()),
             hub_mode: config.hub,
-            idle_timeout_mins: config.idle_timeout,
+            login_limiter: PlMutex::new(HashMap::new()),
         }
+    }
+
+    /// Get or create the broadcast sender for a notebook's runtime events.
+    /// Senders live as long as any session holds a receiver — once all
+    /// sessions for the notebook disconnect, the sender is dropped on the
+    /// next event emit that notices an empty subscriber count.
+    pub async fn notebook_event_tx(&self, canonical: &str) -> broadcast::Sender<NotebookEvent> {
+        let mut map = self.notebook_events.lock().await;
+        map.entry(canonical.to_string())
+            .or_insert_with(|| broadcast::channel(32).0)
+            .clone()
+    }
+
+    /// Check whether a login attempt for `key` (`"{user}:{ip}"`) is within
+    /// the rate limit. Returns `Some(retry_after_secs)` when the caller
+    /// should be rejected with 429, or `None` when the attempt may proceed.
+    pub fn check_login_rate(&self, key: &str) -> Option<u64> {
+        let mut map = self.login_limiter.lock();
+        let now = Instant::now();
+
+        // Opportunistic cleanup — prevents the map from growing unbounded
+        // under a high-volume attack. Only runs when the map exceeds a
+        // modest bound so the common path stays O(1).
+        if map.len() > LOGIN_LIMITER_MAX_ENTRIES {
+            map.retain(|_, a| now.duration_since(a.window_start) <= LOGIN_WINDOW);
+        }
+
+        if let Some(att) = map.get(key) {
+            let elapsed = now.duration_since(att.window_start);
+            if elapsed <= LOGIN_WINDOW && att.count >= LOGIN_MAX_ATTEMPTS {
+                let remaining = LOGIN_WINDOW.saturating_sub(elapsed).as_secs();
+                return Some(remaining.max(1));
+            }
+        }
+        None
+    }
+
+    pub fn record_login_failure(&self, key: &str) {
+        let mut map = self.login_limiter.lock();
+        let now = Instant::now();
+        let entry = map.entry(key.to_string()).or_insert(LoginAttempts {
+            count: 0,
+            window_start: now,
+        });
+        if now.duration_since(entry.window_start) > LOGIN_WINDOW {
+            entry.count = 1;
+            entry.window_start = now;
+        } else {
+            entry.count = entry.count.saturating_add(1);
+        }
+    }
+
+    pub fn clear_login_rate(&self, key: &str) {
+        self.login_limiter.lock().remove(key);
     }
 }

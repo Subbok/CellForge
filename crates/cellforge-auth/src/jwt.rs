@@ -8,6 +8,14 @@ pub struct Claims {
     pub sub: String, // username
     pub exp: usize,  // expiry timestamp
     pub iat: usize,  // issued at
+    /// Token-version epoch. Bumped on password change, admin-disable, and
+    /// admin-role demotion. The auth middleware rejects tokens whose `tv`
+    /// is less than the current DB value, invalidating every outstanding
+    /// JWT for that user in one write. `#[serde(default)]` keeps older
+    /// tokens that predate the column from breaking during rollout — they
+    /// carry `tv = 0`, matching the column default.
+    #[serde(default)]
+    pub tv: i64,
 }
 
 // secret key — generated once per server lifetime, stored in memory.
@@ -46,11 +54,21 @@ fn secret() -> &'static [u8] {
 }
 
 pub fn create_token(username: &str) -> Result<String> {
+    create_token_with_version(username, 0)
+}
+
+/// Create a JWT embedding the given token_version. Call sites that have
+/// access to the UserDb should use this with the current DB value so
+/// bumping the DB version retroactively invalidates the token. Callers
+/// without DB access (tests, compat shims) can use `create_token`, which
+/// embeds `tv=0` and will be rejected as soon as any version bump happens.
+pub fn create_token_with_version(username: &str, token_version: i64) -> Result<String> {
     let now = chrono::Utc::now().timestamp() as usize;
     let claims = Claims {
         sub: username.to_string(),
         exp: now + 7 * 24 * 3600, // 7 days
         iat: now,
+        tv: token_version,
     };
 
     encode(

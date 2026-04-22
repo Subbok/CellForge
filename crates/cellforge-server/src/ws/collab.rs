@@ -110,10 +110,6 @@ pub async fn collab_handler(
     headers: axum::http::HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> axum::response::Response {
-    // Reject unauthenticated collab connections and namespace the room by
-    // username so two users with a `Untitled.ipynb` can't share (or snoop
-    // on) each other's Yjs doc state. The client-supplied `doc` has the
-    // same cross-user collision problem as `notebook_kernels` had.
     let username = match crate::routes::auth::extract_user(&headers) {
         Some(n) => n,
         None => {
@@ -124,10 +120,31 @@ pub async fn collab_handler(
                 .into_response();
         }
     };
-    // Same `{username}::{path}` scheme used everywhere else that caches
-    // per-notebook state. Kept in this module (not re-exported from state)
-    // because the format is an internal implementation detail of CollabState.
-    let doc_id = format!("{username}::{}", query.doc);
+
+    // The Yjs room key is the notebook's canonical absolute path, not the
+    // client-supplied relative one. When user A shares a notebook with user
+    // B via `share_file`, B's workspace gets a symlink; `safe_resolve` follows
+    // it through to A's actual file, so both users end up in the same room
+    // and see each other's edits + cursors live. Two users with genuinely
+    // different notebooks that happen to share a file name stay isolated
+    // because their canonical paths differ.
+    //
+    // `safe_resolve` also does the access check — it refuses paths that
+    // aren't inside the user's workspace (or symlinked in from a share),
+    // so an authenticated user can't join a random notebook's room just
+    // by guessing its path.
+    let user_dir = crate::routes::user_notebook_dir(&state, &headers);
+    let canonical = match crate::routes::safe_resolve(&user_dir, &query.doc) {
+        Ok(p) => p,
+        Err(_) => {
+            tracing::warn!("collab: {username} rejected — no access to {}", query.doc);
+            return (axum::http::StatusCode::FORBIDDEN, "no access to notebook")
+                .into_response();
+        }
+    };
+    let doc_id = canonical.to_string_lossy().to_string();
+    tracing::debug!("collab: {username} joining room {doc_id}");
+
     ws.on_upgrade(move |socket| handle_collab(socket, doc_id, state))
         .into_response()
 }

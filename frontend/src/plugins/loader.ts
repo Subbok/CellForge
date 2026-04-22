@@ -15,6 +15,8 @@
 
 import type { PluginEntry } from './types';
 import { registerMimeRenderer, registerCommand, registerPanelRenderer } from './registry';
+import { useUIStore } from '../stores/uiStore';
+import { api } from '../services/api';
 
 export interface PluginContext {
   /** Register a renderer for a custom MIME type in cell outputs. */
@@ -77,9 +79,7 @@ export async function loadPluginModules(plugins: PluginEntry[]): Promise<void> {
  * user doesn't need to reload the page.
  */
 export async function refreshPlugins(): Promise<void> {
-  const { useUIStore } = await import('../stores/uiStore');
   try {
-    const { api } = await import('../services/api');
     const list = await api.listPlugins();
     useUIStore.getState().setPlugins(list);
     await loadPluginModules(list);

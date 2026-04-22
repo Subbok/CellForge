@@ -1,47 +1,79 @@
 # CellForge AI — GPU-accelerated image with PyTorch and TensorFlow kernels.
-# Builds on top of the lean cellforge-server image.
-#
-# CELLFORGE_VERSION must match a published tag (no default; see Dockerfile.server
-# for the rationale). BASE_IMAGE defaults to the GHCR repo so CI works out of the
-# box; for local builds against a locally-tagged lean image, override it:
-#
+# Multi-stage build: `ai-builder` has uv + build-essential
+# to compile / install torch and tensorflow into their own isolated venvs.
+# The final runtime layers those venvs on top of the lean cellforge-server
+# image, inheriting its minimal attack surface (no gcc/curl/git/apt-get).
+# Torch and TF venvs are standalone — they include their own numpy / pandas
+# etc. to keep versioning isolated from the lean image's scientific stack.
+# The size overhead (~500 MB) is minor against the baseline CUDA wheels.
+# CELLFORGE_VERSION must match a published tag. BASE_IMAGE defaults to the
+# GHCR repo so CI works out of the box; for local builds against a locally
+# tagged lean image, override it:
 #   docker build -f Dockerfile.server --build-arg CELLFORGE_VERSION=v0.5.0 \
 #     -t cellforge-server:dev .
 #   docker build -f Dockerfile.server-ai \
 #     --build-arg BASE_IMAGE=cellforge-server --build-arg CELLFORGE_VERSION=dev \
 #     -t cellforge-server-ai .
 # Run: docker run --gpus all -p 8888:8888 -v $PWD:/data cellforge-server-ai
-#
 # Requires nvidia-container-toolkit on the host.
 
 ARG BASE_IMAGE=ghcr.io/subbok/cellforge-server
 ARG CELLFORGE_VERSION
-FROM ${BASE_IMAGE}:${CELLFORGE_VERSION}
 
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+# ─── Stage 1: ai-builder ───────────────────────────────────────────────
+# Fresh Ubuntu so we have the full apt/curl/uv toolchain. Not based on the
+# lean runtime because that deliberately strips those tools.
+FROM ubuntu:24.04 AS ai-builder
 
-# PyTorch kernel. --system-site-packages lets the venv see numpy/pandas/etc.
-# from the lean base without duplication.
-RUN uv venv --system-site-packages /venvs/torch \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.12 python3.12-venv python3-pip \
+      curl ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+# PyTorch kernel — pinned CUDA 12.6 wheels from the PyTorch index.
+RUN uv venv --python=3.12 /venvs/torch \
  && uv pip install --python /venvs/torch/bin/python \
       --index-url https://download.pytorch.org/whl/cu126 \
       torch torchvision torchaudio \
  && uv pip install --python /venvs/torch/bin/python \
+      numpy scipy matplotlib pandas scikit-learn pillow \
       transformers accelerate datasets tokenizers \
       peft bitsandbytes diffusers sentencepiece einops \
       lightning timm opencv-python-headless \
       ipykernel \
  && /venvs/torch/bin/python -m ipykernel install \
+      --prefix=/usr/local \
       --name torch --display-name "Python 3.12 (PyTorch)"
 
 # TensorFlow kernel.
-RUN uv venv --system-site-packages /venvs/tf \
+RUN uv venv --python=3.12 /venvs/tf \
  && uv pip install --python /venvs/tf/bin/python \
       "tensorflow[and-cuda]" \
+      numpy scipy matplotlib pandas pillow \
       keras-cv keras-nlp tensorflow-text \
       tensorflow-datasets tensorflow-hub tensorflow-probability \
       transformers \
       ipykernel \
  && /venvs/tf/bin/python -m ipykernel install \
+      --prefix=/usr/local \
       --name tf --display-name "Python 3.12 (TensorFlow)"
+
+# ─── Stage 2: runtime (layered on the lean image) ──────────────────────
+FROM ${BASE_IMAGE}:${CELLFORGE_VERSION}
+
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Copy only the torch/tf kernelspecs and their venvs. The lean image's
+# existing python3 kernelspec at /usr/local/share/jupyter/kernels/python3
+# is preserved because we copy the sibling directories explicitly.
+COPY --from=ai-builder /venvs /venvs
+COPY --from=ai-builder /usr/local/share/jupyter/kernels/torch \
+     /usr/local/share/jupyter/kernels/torch
+COPY --from=ai-builder /usr/local/share/jupyter/kernels/tf \
+     /usr/local/share/jupyter/kernels/tf

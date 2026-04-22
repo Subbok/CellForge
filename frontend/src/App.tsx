@@ -16,6 +16,7 @@ import { useNotebookStore } from './stores/notebookStore';
 import { useKernelStore } from './stores/kernelStore';
 import { useUIStore } from './stores/uiStore';
 import { registerBuiltinRenderers } from './plugins/builtins';
+import { loadPluginModules } from './plugins/loader';
 import { useTabStore } from './stores/tabStore';
 import { saveCurrentTab } from './services/tabManager';
 import { api } from './services/api';
@@ -124,7 +125,6 @@ function App() {
       }
       // load frontend JS modules from plugins that declare widgets
       if (pluginList.length > 0) {
-        const { loadPluginModules } = await import('./plugins/loader');
         await loadPluginModules(pluginList);
       }
     })();

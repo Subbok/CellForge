@@ -96,6 +96,9 @@ pub async fn dashboard_kernels(
 }
 
 /// POST /api/kernels/:id/stop — stop a specific kernel.
+/// Idempotent: missing kernels return 200 so dashboard UIs can use the
+/// response to clear stale entries after the reaper or a WS-close already
+/// stopped the kernel in-between the user's poll and click.
 pub async fn stop_kernel(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -107,24 +110,21 @@ pub async fn stop_kernel(
         .get_user(&username)
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    // Find the kernel session to verify ownership
+    // Find the kernel session to verify ownership. If it's gone, treat as
+    // already-stopped: the user's dashboard raced the reaper or a WS close.
     let all_sessions = state.users.list_kernel_sessions();
-    let session = all_sessions
-        .iter()
-        .find(|s| s.id == kernel_id)
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    // Verify kernel belongs to user OR user is admin
-    if session.username != username && !user.is_admin {
+    if let Some(session) = all_sessions.iter().find(|s| s.id == kernel_id)
+        && session.username != username
+        && !user.is_admin
+    {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // Stop the kernel via KernelManager
+    // Stop the kernel via KernelManager (no-op if already gone) and
+    // unconditionally scrub the DB row so the dashboard stops listing it.
     let mut km = state.kernels.lock().await;
     let _ = km.stop(&kernel_id).await;
-
-    // Remove from DB
     let _ = state.users.remove_kernel_session(&kernel_id);
 
-    Ok(StatusCode::OK)
+    Ok(Json(serde_json::json!({ "ok": true })))
 }

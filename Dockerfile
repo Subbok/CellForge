@@ -20,7 +20,10 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     python3 \
     python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    bubblewrap \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1000 cellforge-kernel \
+    && useradd -u 1000 -g 1000 -s /usr/sbin/nologin -M cellforge-kernel
 
 # Install ipykernel so there's at least one kernel available
 RUN pip3 install --break-system-packages ipykernel && \

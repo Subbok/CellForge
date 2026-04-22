@@ -265,9 +265,18 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate SHA256SUMS
+        # Hashes every artifact so Dockerfile.server (and anyone pulling
+        # binaries directly) can verify integrity.
+        working-directory: artifacts
+        run: |
+          sha256sum cellforge-* > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |
             artifacts/cellforge-*
+            artifacts/SHA256SUMS

@@ -1,5 +1,4 @@
 //! HTTP routes for plugin management.
-//!
 //! ```text
 //! GET    /api/plugins               — merged list (user overrides system)
 //! GET    /api/plugins/config        — current admin settings
@@ -116,13 +115,28 @@ pub async fn upload_plugin(
             PluginScope::System
         }
         _ => {
-            // per-user: respect the admin toggle
-            let allow = state.plugin_settings.read().allow_user_plugins;
-            if !allow && !is_admin {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    "user plugin installation is disabled by admin".into(),
-                ));
+            // Per-user plugins load as Python modules into the user's kernel
+            // PYTHONPATH (see ws/handler.rs rebuild_user_kernel_pylib). In a
+            // multi-user deployment that means each user effectively runs
+            // arbitrary installed code as the server UID — same risk class as
+            // the kernel-isolation gap. Until that's closed, restrict
+            // user-scope plugin installs to admins whenever the deployment
+            // is multi-user.
+            let multi_user = state.hub_mode || state.users.list_users().len() > 1;
+            let allow_setting = state.plugin_settings.read().allow_user_plugins;
+            let effectively_allowed = if multi_user {
+                false
+            } else {
+                allow_setting
+            };
+            if !effectively_allowed && !is_admin {
+                let reason = if multi_user {
+                    "user plugin installation is disabled in multi-user deployments; \
+                     ask an admin to install system-scope"
+                } else {
+                    "user plugin installation is disabled by admin"
+                };
+                return Err((StatusCode::FORBIDDEN, reason.into()));
             }
             PluginScope::User
         }
@@ -280,6 +294,7 @@ fn install_plugin_zip(
 /// unit-tested against tempdirs without touching the real config dir.
 ///
 /// Safety (in order):
+///
 /// 1. parse the manifest from the archive first; bail if missing or bad-named
 /// 2. pre-validate EVERY entry for path traversal before touching disk
 /// 3. extract into a hidden staging directory next to the final location
@@ -297,10 +312,8 @@ pub(crate) fn install_plugin_zip_to(
     // step 1: locate + parse the manifest, AND learn the wrapper prefix
     // (if any). The wrapper is determined exactly once from the location
     // of plugin.json in the archive, so we never guess.
-    //
     //   plugin.json                    → wrapper = ""
     //   cellforge-mermaid/plugin.json  → wrapper = "cellforge-mermaid/"
-    //
     // This is safer than guessing per-entry, which would misinterpret
     // legitimate subdirectories like `pylib/` as a wrapper.
     let mut manifest: Option<PluginManifest> = None;
@@ -328,12 +341,36 @@ pub(crate) fn install_plugin_zip_to(
         anyhow::bail!("invalid plugin name '{}'", manifest.name);
     }
 
+    // Size caps — reject zip bombs before extraction. 10 MiB per file and
+    // 50 MiB total uncompressed is plenty for any sane plugin and cheap to
+    // check against `ZipFile::size()` (the header-declared uncompressed size).
+    const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+    const MAX_TOTAL_SIZE: u64 = 50 * 1024 * 1024;
+
     // step 2: pre-validate all entries before touching disk. Any path that
     // doesn't live under the wrapper is rejected outright.
+    let mut total_size: u64 = 0;
     for i in 0..archive.len() {
         let file = archive.by_index(i)?;
-        let name = file.name();
-        if let Some(rel) = strip_wrapper(name, &wrapper) {
+        let name = file.name().to_string();
+        let entry_size = file.size();
+
+        if entry_size > MAX_FILE_SIZE {
+            anyhow::bail!(
+                "plugin entry '{name}' is {} MiB (max {} MiB per file)",
+                entry_size / 1024 / 1024,
+                MAX_FILE_SIZE / 1024 / 1024
+            );
+        }
+        total_size = total_size.saturating_add(entry_size);
+        if total_size > MAX_TOTAL_SIZE {
+            anyhow::bail!(
+                "plugin archive exceeds {} MiB total uncompressed",
+                MAX_TOTAL_SIZE / 1024 / 1024
+            );
+        }
+
+        if let Some(rel) = strip_wrapper(&name, &wrapper) {
             if rel.is_empty() || rel.ends_with('/') {
                 continue;
             }
@@ -353,6 +390,12 @@ pub(crate) fn install_plugin_zip_to(
         let _ = std::fs::remove_dir_all(&staging);
     }
     std::fs::create_dir_all(&staging)?;
+
+    // Canonicalize staging once so we can verify every written entry
+    // resolves strictly inside it (belt-and-braces on the
+    // string-based `..`/leading-`/` check above, catches any path trick the
+    // string check misses via symlinks or zip-crate decoding changes).
+    let staging_canon = std::fs::canonicalize(&staging)?;
 
     let extract_result = (|| -> anyhow::Result<()> {
         for i in 0..archive.len() {
@@ -378,6 +421,17 @@ pub(crate) fn install_plugin_zip_to(
             }
             let mut out_file = std::fs::File::create(&out_path)?;
             std::io::copy(&mut file, &mut out_file)?;
+
+            // Defense-in-depth: canonicalize the just-written path and verify
+            // it's still inside staging. If a future zip-crate change or an
+            // unexpected filesystem behavior lets a path escape the string
+            // check, this catches it before the staging dir is renamed into
+            // place.
+            let out_canon = std::fs::canonicalize(&out_path)?;
+            if !out_canon.starts_with(&staging_canon) {
+                let _ = std::fs::remove_file(&out_canon);
+                anyhow::bail!("zip entry '{rel}' escaped staging root");
+            }
         }
         Ok(())
     })();
@@ -400,7 +454,6 @@ pub(crate) fn install_plugin_zip_to(
 /// Strip the wrapper prefix from a zip entry. Returns `None` if the entry
 /// doesn't live under `wrapper`, which signals that the entry should be
 /// rejected (e.g. it lives outside the plugin's own directory).
-///
 /// When `wrapper` is empty, every entry is considered valid and returned
 /// as-is (minus leading `/`, which would be absolute).
 fn strip_wrapper(name: &str, wrapper: &str) -> Option<String> {

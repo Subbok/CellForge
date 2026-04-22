@@ -27,11 +27,12 @@ fn test_state(dir: &std::path::Path) -> Arc<AppState> {
         sessions: RwLock::new(HashMap::new()),
         kernels: Mutex::new(KernelManager::new()),
         notebook_kernels: Mutex::new(HashMap::new()),
+        notebook_events: Mutex::new(HashMap::new()),
         users: UserDb::open_at(db_path).expect("user db"),
         collab: Arc::new(CollabState::new()),
         plugin_settings: RwLock::new(PluginSettings::default()),
         hub_mode: false,
-        idle_timeout_mins: 30,
+        login_limiter: parking_lot::Mutex::new(std::collections::HashMap::new()),
     })
 }
 

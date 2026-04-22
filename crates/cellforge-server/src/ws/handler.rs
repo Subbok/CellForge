@@ -1,4 +1,4 @@
-use crate::state::{AppState, notebook_kernel_key};
+use crate::state::AppState;
 use crate::ws::protocol::{self, WsMessage};
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
@@ -49,7 +49,6 @@ pub async fn ws_handler(
 }
 
 /// Per-connection session state.
-///
 /// Supports multiple kernels (one per language) within a single notebook
 /// session.  The first kernel started on connect becomes the "default".
 /// Additional kernels are launched lazily when a cell targets a different
@@ -69,6 +68,11 @@ struct Session {
     detail_ids: Arc<Mutex<HashSet<String>>>,
     /// Handles for iopub/shell forwarding tasks (so we can abort them on disconnect).
     forwarding_handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Canonical absolute path of the notebook this session is attached to.
+    /// Used to key `state.notebook_kernels` so multiple sessions on the same
+    /// shared notebook reuse one kernel per language. `None` for sessions
+    /// that opened no specific notebook (`--notebook` unset on connect).
+    notebook_canonical: Option<String>,
 }
 
 async fn handle_socket(
@@ -100,11 +104,13 @@ async fn handle_socket(
         None => Vec::new(),
     };
 
-    // ── Hub mode: enforce resource limits before starting a kernel ──
-    if state.hub_mode
-        && let Some(ref name) = username
-    {
-        if !state.users.user_is_active(name) {
+    // Pre-kernel-start resource checks. `max_kernels` applies in ANY deployment
+    // mode — an admin who configured per-user limits expects them to fire
+    // whether or not `--hub` was passed. The
+    // `user_is_active` (admin-disable) check stays hub-only for now since
+    // the underlying disable flow needs a follow-up pass.
+    if let Some(ref name) = username {
+        if state.hub_mode && !state.users.user_is_active(name) {
             let err_msg = WsMessage {
                 msg_type: protocol::ERROR.into(),
                 id: "boot".into(),
@@ -144,7 +150,6 @@ async fn handle_socket(
     }
 
     // resolve or start a kernel
-    //
     // `freshly_started` tracks whether THIS handler started the kernel. If so,
     // `KernelManager::start()` initialized ref_count=1 on our behalf (the
     // "creator ref"), and we take it over as the first subscriber instead of
@@ -153,24 +158,54 @@ async fn handle_socket(
     let nb_cwd = notebook_path
         .as_deref()
         .map(|nb| notebook_cwd(&base_dir, nb));
-    let (kernel_id, freshly_started) = if let Some(ref nb) = notebook_path {
-        // Compose per-user key so user A's `Untitled.ipynb` can't reuse
-        // (hijack) user B's kernel. Unauthenticated connections are rejected
-        // above; "anonymous" is a defensive fallback only.
-        let user_key = username.as_deref().unwrap_or("anonymous");
-        let nb_key = notebook_kernel_key(user_key, nb);
+    // Resolve the notebook's canonical path once up-front. Used as the outer
+    // key in state.notebook_kernels so collaborators on the same shared file
+    // share kernels. Also stored on the Session so the cleanup path and
+    // on-demand language-kernel spawns can look up the right slot.
+    let nb_canonical: Option<String> = if let Some(ref nb) = notebook_path {
+        match crate::routes::safe_resolve(&base_dir, nb) {
+            Ok(p) => Some(p.to_string_lossy().to_string()),
+            Err(_) => {
+                send_boot_error(ws_tx, "notebook not accessible").await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
 
-        // check if a kernel already exists for this (user, notebook) pair
-        let existing = state.notebook_kernels.lock().await.get(&nb_key).cloned();
+    // Pre-resolve the kernelspec language so we key notebook_kernels by the
+    // right slot before the kernel is started. Falls back to "python" — same
+    // default as the later language-discovery block at the Session ctor.
+    let default_lang_guess: String =
+        cellforge_kernel::launcher::find_kernelspec(&kernel_name)
+            .map(|(_, spec)| spec.language.clone())
+            .unwrap_or_else(|_| "python".into());
+
+    let (kernel_id, freshly_started) = if let Some(ref nb_key) = nb_canonical {
+        // Is there already a shared kernel for this (canonical, language)?
+        // If so, every collaborator joins the same process.
+        let existing = state
+            .notebook_kernels
+            .lock()
+            .await
+            .get(nb_key)
+            .and_then(|m| m.get(&default_lang_guess))
+            .cloned();
         if let Some(kid) = existing {
-            // verify the kernel is still alive in the manager
             let alive = state.kernels.lock().await.get(&kid).is_some();
             if alive {
-                tracing::info!("reusing kernel {kid} for notebook {nb} (user={user_key})");
+                tracing::info!(
+                    "reusing kernel {kid} for notebook {} (joiner={}, lang={default_lang_guess})",
+                    notebook_path.as_deref().unwrap_or(""),
+                    username.as_deref().unwrap_or("anonymous")
+                );
                 (kid, false)
             } else {
                 // stale mapping, start fresh
-                state.notebook_kernels.lock().await.remove(&nb_key);
+                if let Some(inner) = state.notebook_kernels.lock().await.get_mut(nb_key) {
+                    inner.remove(&default_lang_guess);
+                }
                 match start_new_kernel(&state, &kernel_name, nb_cwd.as_deref(), &extra_pythonpath)
                     .await
                 {
@@ -179,7 +214,9 @@ async fn handle_socket(
                             .notebook_kernels
                             .lock()
                             .await
-                            .insert(nb_key.clone(), id.clone());
+                            .entry(nb_key.clone())
+                            .or_default()
+                            .insert(default_lang_guess.clone(), id.clone());
                         (id, true)
                     }
                     Err(e) => {
@@ -196,7 +233,9 @@ async fn handle_socket(
                         .notebook_kernels
                         .lock()
                         .await
-                        .insert(nb_key.clone(), id.clone());
+                        .entry(nb_key.clone())
+                        .or_default()
+                        .insert(default_lang_guess.clone(), id.clone());
                     (id, true)
                 }
                 Err(e) => {
@@ -274,6 +313,7 @@ async fn handle_socket(
         complete_ids: Arc::new(Mutex::new(HashSet::new())),
         detail_ids: Arc::new(Mutex::new(HashSet::new())),
         forwarding_handles: Mutex::new(Vec::new()),
+        notebook_canonical: nb_canonical.clone(),
     });
 
     // send initial status
@@ -307,11 +347,83 @@ async fn handle_socket(
         shell_reader(shell_rx, &s2, &state2, &lang2).await;
     });
 
+    // Pre-subscribe to every other language kernel already running for this
+    // notebook. Without this, a collaborator who joins after user A has
+    // spawned an R kernel wouldn't see R vars in the explorer or R cell
+    // outputs until they themselves execute an R cell.
+    if let Some(ref nb_key) = nb_canonical {
+        let existing: Vec<(String, String)> = state
+            .notebook_kernels
+            .lock()
+            .await
+            .get(nb_key)
+            .map(|m| {
+                m.iter()
+                    .filter(|(lang, _)| lang.as_str() != language.as_str())
+                    .map(|(lang, kid)| (lang.clone(), kid.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (lang, kid) in existing {
+            if let Err(e) = subscribe_session_to_kernel(&sess, &state, &lang, &kid).await {
+                tracing::warn!("pre-subscribe to {lang} kernel {kid} failed: {e}");
+            }
+        }
+    }
+
+    // Subscribe to the notebook's event channel so we auto-join any kernel
+    // another collaborator spawns later. The listener task exits when the
+    // session is dropped and its receiver closes.
+    if let Some(ref nb_key) = nb_canonical {
+        let rx = state.notebook_event_tx(nb_key).await.subscribe();
+        let s_listener = sess.clone();
+        let state_listener = state.clone();
+        let nb_for_log = nb_key.clone();
+        let listener = tokio::spawn(async move {
+            let mut rx = rx;
+            while let Ok(event) = rx.recv().await {
+                match event {
+                    crate::state::NotebookEvent::KernelStarted { language, kernel_id } => {
+                        if s_listener.kernels.lock().await.contains_key(&language) {
+                            continue;
+                        }
+                        if let Err(e) = subscribe_session_to_kernel(
+                            &s_listener,
+                            &state_listener,
+                            &language,
+                            &kernel_id,
+                        )
+                        .await
+                        {
+                            tracing::warn!(
+                                "auto-subscribe to {language} kernel {kernel_id} \
+                                 for notebook {nb_for_log} failed: {e}"
+                            );
+                        } else {
+                            tracing::info!(
+                                "session auto-joined {language} kernel {kernel_id} \
+                                 for notebook {nb_for_log}"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+        sess.forwarding_handles.lock().await.push(listener);
+    }
+
     // store handles so we can abort them later
     sess.forwarding_handles
         .lock()
         .await
         .extend([iopub_handle, shell_handle]);
+
+    // If we joined an existing default-language kernel (e.g. a collaborator
+    // opened a notebook that already had a Python kernel going), trigger a
+    // refresh introspection so the variables panel shows current state.
+    if !freshly_started {
+        kick_introspection(&state, &kernel_id, &language).await;
+    }
 
     // main loop: read websocket messages from frontend
     loop {
@@ -372,17 +484,22 @@ async fn handle_socket(
         };
 
         if should_stop {
-            // only remove notebook->kernel mapping for the default kernel.
-            // Must use the same `{username}::{notebook_path}` key we inserted
-            // under, otherwise a stale entry would linger forever and a
-            // second connection for the same notebook would try to reuse
-            // a dead kernel_id.
-            if *lang == sess.default_language
-                && let Some(ref nb) = notebook_path
-            {
-                let user_key = username.as_deref().unwrap_or("anonymous");
-                let nb_key = notebook_kernel_key(user_key, nb);
-                state.notebook_kernels.lock().await.remove(&nb_key);
+            // Drop THIS language's entry from the shared registry. Cross-user
+            // kernel sharing means any language kernel (not just the default)
+            // may be referenced from other sessions' maps — but the one we
+            // just decremented to zero means no one's holding it anymore, so
+            // remove our slot. Guard against races by checking that the
+            // registered id still matches ours before removing.
+            if let Some(ref nb_key) = sess.notebook_canonical {
+                let mut map = state.notebook_kernels.lock().await;
+                if let Some(inner) = map.get_mut(nb_key) {
+                    if inner.get(lang).map(|id| id == kid).unwrap_or(false) {
+                        inner.remove(lang);
+                    }
+                    if inner.is_empty() {
+                        map.remove(nb_key);
+                    }
+                }
             }
             // Remove the kernel session from the DB
             if let Err(e) = state.users.remove_kernel_session(kid) {
@@ -433,6 +550,104 @@ fn find_spec_for_language(language: &str) -> Option<String> {
     found
 }
 
+/// Kick off a silent introspection request on a kernel so every subscribed
+/// session receives a fresh `VARIABLES_UPDATE`. Used when a session joins an
+/// already-running kernel — without this, the joiner's variables panel stays
+/// empty until the NEXT cell executes on that kernel.
+async fn kick_introspection(state: &AppState, kernel_id: &str, language: &str) {
+    let inspect_code = match language {
+        "r" | "R" => introspect_r::INSPECT_VARIABLES,
+        "julia" => introspect_julia::INSPECT_VARIABLES,
+        "octave" => introspect_octave::INSPECT_VARIABLES,
+        "javascript" => introspect_javascript::INSPECT_VARIABLES,
+        "ruby" => introspect_ruby::INSPECT_VARIABLES,
+        "kotlin" => introspect_kotlin::INSPECT_VARIABLES,
+        _ => introspect::INSPECT_VARIABLES,
+    };
+    let mut km = state.kernels.lock().await;
+    if let Some(k) = km.get_mut(kernel_id) {
+        match k.client.execute_no_history(inspect_code).await {
+            Ok(mid) => {
+                k.shared.introspect_ids.lock().await.insert(mid);
+            }
+            Err(e) => tracing::warn!("kick_introspection failed for {language}: {e}"),
+        }
+    }
+}
+
+/// Subscribe this session to an already-running kernel: bumps ref_count,
+/// records the kernel in `sess.kernels` / `sess.kernel_states`, and spawns the
+/// iopub + shell forwarding tasks. Emits a `kernel_status: idle` to the client
+/// so the UI flips the indicator for the newly joined language.
+///
+/// Shared by the on-connect pre-subscribe path, the notebook-events listener
+/// (auto-join when a collaborator spawns a new kernel), and the collab-reuse
+/// branch of `ensure_kernel_for_language`.
+async fn subscribe_session_to_kernel(
+    sess: &Arc<Session>,
+    state: &Arc<AppState>,
+    language: &str,
+    kernel_id: &str,
+) -> Result<(), String> {
+    let (iopub_rx, shell_rx, shared) = {
+        let km = state.kernels.lock().await;
+        let k = km
+            .get(kernel_id)
+            .ok_or_else(|| format!("kernel {kernel_id} not found"))?;
+        k.ref_count.fetch_add(1, Ordering::Relaxed);
+        (
+            k.iopub_tx.subscribe(),
+            k.shell_tx.subscribe(),
+            k.shared.clone(),
+        )
+    };
+
+    sess.kernels
+        .lock()
+        .await
+        .insert(language.to_string(), kernel_id.to_string());
+    sess.kernel_states
+        .lock()
+        .await
+        .insert(language.to_string(), shared);
+
+    let s1 = sess.clone();
+    let state1 = state.clone();
+    let lang1 = language.to_string();
+    let iopub_handle = tokio::spawn(async move {
+        forward_iopub(iopub_rx, &s1, &state1, &lang1).await;
+    });
+    let s2 = sess.clone();
+    let state2 = state.clone();
+    let lang2 = language.to_string();
+    let shell_handle = tokio::spawn(async move {
+        shell_reader(shell_rx, &s2, &state2, &lang2).await;
+    });
+    sess.forwarding_handles
+        .lock()
+        .await
+        .extend([iopub_handle, shell_handle]);
+
+    {
+        let mut tx = sess.ws_tx.lock().await;
+        let _ = send_json(
+            &mut *tx,
+            &WsMessage {
+                msg_type: protocol::KERNEL_STATUS.into(),
+                id: "init".into(),
+                session_id: Some(kernel_id.to_string()),
+                payload: serde_json::json!({"status": "idle", "language": language}),
+            },
+        )
+        .await;
+    }
+
+    // Populate the joiner's variables panel from the kernel's current state.
+    kick_introspection(state, kernel_id, language).await;
+
+    Ok(())
+}
+
 /// Ensure a kernel for the requested language is running in this session.
 /// Returns the kernel_id. If none exists yet, finds the appropriate kernelspec
 /// and starts a new kernel, subscribing to its iopub/shell channels.
@@ -443,11 +658,36 @@ async fn ensure_kernel_for_language(
     cwd: Option<&std::path::Path>,
     extra_pythonpath: &[std::path::PathBuf],
 ) -> Result<String, String> {
-    // fast path: kernel already running for this language
+    // fast path: kernel already running for this language IN THIS SESSION
     {
         let kernels = sess.kernels.lock().await;
         if let Some(id) = kernels.get(language) {
             return Ok(id.clone());
+        }
+    }
+
+    // collab path: another session on the same shared notebook may already
+    // have a kernel running for this language. Reuse it so both users' cell
+    // executions, iopub streams, and variable namespaces converge. Without
+    // this, user B who joined a shared notebook would spawn a parallel R /
+    // Julia / … kernel whenever they executed a non-default-lang cell, even
+    // if user A already had one going.
+    if let Some(ref nb_key) = sess.notebook_canonical {
+        let existing = state
+            .notebook_kernels
+            .lock()
+            .await
+            .get(nb_key)
+            .and_then(|m| m.get(language))
+            .cloned();
+        if let Some(kid) = existing
+            && state.kernels.lock().await.get(&kid).is_some()
+        {
+            tracing::info!(
+                "reusing shared kernel {kid} for language={language} in notebook {nb_key}"
+            );
+            subscribe_session_to_kernel(sess, state, language, &kid).await?;
+            return Ok(kid);
         }
     }
 
@@ -490,7 +730,6 @@ async fn ensure_kernel_for_language(
     let kernel_id = start_new_kernel(state, &spec_name, cwd, extra_pythonpath).await?;
 
     // subscribe to broadcast channels.
-    //
     // We just started this kernel, so `KernelManager::start()` initialized
     // ref_count=1 on our behalf (the creator ref). Take it over as the first
     // subscriber instead of fetch_add'ing — otherwise the reaper could kill
@@ -516,6 +755,26 @@ async fn ensure_kernel_for_language(
         .lock()
         .await
         .insert(language.to_string(), shared);
+
+    // Register globally so other collaborators on the same notebook pick
+    // up this kernel via the collab-reuse path above instead of spawning
+    // their own. Broadcast the spawn so already-connected sessions auto-join
+    // the new kernel without waiting for their own cell execution.
+    if let Some(ref nb_key) = sess.notebook_canonical {
+        state
+            .notebook_kernels
+            .lock()
+            .await
+            .entry(nb_key.clone())
+            .or_default()
+            .insert(language.to_string(), kernel_id.clone());
+
+        let tx = state.notebook_event_tx(nb_key).await;
+        let _ = tx.send(crate::state::NotebookEvent::KernelStarted {
+            language: language.to_string(),
+            kernel_id: kernel_id.clone(),
+        });
+    }
 
     // spawn forwarding tasks for the new kernel
     let s1 = sess.clone();
@@ -557,7 +816,6 @@ async fn ensure_kernel_for_language(
 
 /// Resolve the directory a kernel should run in, given a notebook path
 /// relative to the user's workspace root.
-///
 /// Refuses anything that escapes `base` (path traversal guard).
 /// Canonicalizes `base` first so the starts_with check also works through symlinks.
 fn notebook_cwd(base: &std::path::Path, notebook_rel: &str) -> std::path::PathBuf {
@@ -700,7 +958,6 @@ async fn handle_client_msg(
             // user's code. `injection_code_for` filters out vars whose source
             // language matches the target, so this is safe to run on every
             // kernel including the default one.
-            //
             // Release the `ns` lock BEFORE awaiting execute — the iopub handler
             // also needs this lock to record introspection results.
             {
@@ -889,7 +1146,6 @@ async fn handle_client_msg(
 }
 
 /// Background task: reads shell replies from the broadcast channel.
-///
 /// `language` identifies which kernel this reader is attached to, so we can
 /// look up the correct kernel_id and SharedKernelState from the session maps.
 async fn shell_reader(
@@ -953,20 +1209,23 @@ async fn shell_reader(
             }
         }
 
-        // find the cell and compute timing — remove from msg_to_cell here
-        // (same lifecycle as exec_start) to prevent unbounded growth over a
-        // long session. Each execute_reply finishes a cell's lookup needs.
+        // Look up (do NOT remove) the cell mapping and start time. Multiple
+        // sessions share this kernel's state — every subscribed shell_reader
+        // must be able to resolve the cell_id to forward execute_reply to its
+        // own client. A `remove` here would let the first reader win and leave
+        // every other collaborator's cell stuck in "running".
         let cell_id = shared
             .msg_to_cell
             .lock()
             .await
-            .remove(&parent_id)
+            .get(&parent_id)
+            .cloned()
             .unwrap_or_default();
         let elapsed_ms = shared
             .exec_start
             .lock()
             .await
-            .remove(&parent_id)
+            .get(&parent_id)
             .map(|t| t.elapsed().as_millis() as u64);
 
         if cell_id.is_empty() {
@@ -1078,7 +1337,6 @@ async fn shell_reader(
 
 /// Forwards iopub messages to the websocket in real time.
 /// Introspection output is intercepted and sent as variables_update instead.
-///
 /// `language` identifies which kernel this forwarder is attached to.
 async fn forward_iopub(
     mut rx: broadcast::Receiver<JupyterMessage>,

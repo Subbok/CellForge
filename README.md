@@ -1,8 +1,8 @@
 # CellForge
 
-> A modern notebook IDE — Rust backend, React frontend, real Jupyter kernels, live collaboration, and PDF export via Typst.
+> A modern notebook IDE — Rust backend, React frontend, real Jupyter kernels, reactive execution, and PDF export via Typst.
 
-![version](https://img.shields.io/badge/version-0.5.0-blue)
+![version](https://img.shields.io/badge/version-1.0.0-blue)
 ![rust](https://img.shields.io/badge/rust-2024-orange)
 ![react](https://img.shields.io/badge/react-19-61dafb)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-green)
@@ -61,23 +61,13 @@ You need at least one Jupyter kernel installed: `pip install ipykernel`
 ## Highlights
 
 - **Any Jupyter kernel** — Python, R, Julia, JavaScript, Kotlin, Go, and anything that speaks the Jupyter wire protocol. Auto-detects conda envs, venvs, and system installs.
-- **Live collaboration** — Yjs CRDT with remote cursors, shared editing, broadcasted cell operations.
+- **Real-time collaboration** — open the same notebook in several tabs, devices, or user accounts (via file sharing); edits, cursors, cell ops, and outputs stay in sync via Yjs CRDT. Collaborators share one kernel process per language, so variables, execution state, and iopub streams converge across users.
 - **Reactive execution** — AST-based cell dependency DAG, auto-reruns downstream cells on change.
 - **Built-in viz library** — `import cellforge as cf` — charts, diagrams, widgets, progress bars. No pip install. [Docs](https://github.com/Subbok/cellforge/wiki/Built-in-Library)
 - **PDF export via embedded Typst** — no LaTeX, no external tools. Custom `.typ` templates. [Docs](https://github.com/Subbok/cellforge/wiki/Writing-Typst-Templates)
 - **Plugin system** — themes, Python helpers, custom renderers, toolbar buttons, sidebar panels, keybindings. [Docs](https://github.com/Subbok/cellforge/wiki/Writing-Plugins)
-- **Hub mode** — `--hub` enables resource limits, admin panel, user/group management. Single binary, no JupyterHub.
-- **Multi-user** — SQLite accounts, JWT auth, per-user workspaces, file sharing.
-
-> ⚠️ **Hub mode security warning**
->
-> Hub mode is enabled but kernel isolation is **NOT implemented**.
-> All user kernels run as the same OS user as the server.
-> Any authenticated user can read the server's files, including
-> other users' notebooks and the auth database.
->
-> **DO NOT use hub mode for untrusted users.**
-> Full isolation planned for v1.1 (bubblewrap / docker).
+- **Per-kernel sandboxing** — each kernel runs in a bubblewrap jail with mount, PID, and network isolation on Linux; graceful fallback when kernel namespaces are unavailable (Docker default, restricted hosts). [Docs](https://github.com/Subbok/CellForge/wiki/Deployment-Security)
+- **Multi-user** — SQLite accounts, JWT auth with session invalidation, bcrypt with constant-time fallback, per-user workspaces, file sharing with live collab, admin panel, per-group resource limits. Single binary, no JupyterHub.
 
 CellForge ships as a ~30 MB binary. Compare: JupyterLab (~150 MB) + TeX Live for PDF export (~2-4 GB).
 
@@ -153,7 +143,6 @@ Tests: `cargo test --workspace` (190+ tests). Type-check: `cd frontend && npx ts
 
 ## Roadmap
 
-- Container-per-user hub isolation
 - Debugger integration (breakpoints, step-through)
 - Extension marketplace
 

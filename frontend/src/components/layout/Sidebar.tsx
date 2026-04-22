@@ -61,7 +61,11 @@ function PluginPanelHost({ panelId }: { panelId: string }) {
     if (!el) return;
     const render = getPanelRenderer(panelId);
     if (!render) {
-      el.innerHTML = `<div class="text-xs text-text-muted p-4 text-center">Panel "${panelId}" has no renderer registered.</div>`;
+      el.replaceChildren();
+      const msg = document.createElement('div');
+      msg.className = 'text-xs text-text-muted p-4 text-center';
+      msg.textContent = `Panel "${panelId}" has no renderer registered.`;
+      el.appendChild(msg);
       return;
     }
     const cleanup = render(el);

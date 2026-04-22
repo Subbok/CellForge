@@ -3,7 +3,7 @@ import { useNotebookStore } from '../stores/notebookStore';
 import { useKernelStore } from '../stores/kernelStore';
 import { useUIStore } from '../stores/uiStore';
 import { useVariableStore } from '../stores/variableStore';
-import { onCellDone } from './executionQueue';
+import { onCellDone, queueCells } from './executionQueue';
 import { onExecuteReply } from '../hooks/useKernel';
 import type { WsMessage, KernelStatus, CellOutput, VariableInfo, DagEdge } from '../lib/types';
 import type { DataFramePreview } from '../stores/variableStore';
@@ -206,9 +206,7 @@ export function setupMessageHandlers() {
         return cell && cell.status !== 'running' && cell.status !== 'queued';
       });
       if (toRun.length > 0) {
-        import('./executionQueue').then(eq => {
-          eq.queueCells(toRun);
-        });
+        queueCells(toRun);
       }
     }
   });
