@@ -35,10 +35,7 @@ pub struct AppConfig {
 /// should treat that string as an opaque bucket (all "unknown" clients share
 /// one rate-limit slot, which is fine for a v1 implementation).
 pub fn client_ip(headers: &HeaderMap) -> String {
-    if std::env::var("CELLFORGE_TRUST_XFF")
-        .ok()
-        .as_deref()
-        == Some("1")
+    if std::env::var("CELLFORGE_TRUST_XFF").ok().as_deref() == Some("1")
         && let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
         && let Some(first) = xff.split(',').next()
     {

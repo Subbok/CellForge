@@ -177,10 +177,9 @@ async fn handle_socket(
     // Pre-resolve the kernelspec language so we key notebook_kernels by the
     // right slot before the kernel is started. Falls back to "python" — same
     // default as the later language-discovery block at the Session ctor.
-    let default_lang_guess: String =
-        cellforge_kernel::launcher::find_kernelspec(&kernel_name)
-            .map(|(_, spec)| spec.language.clone())
-            .unwrap_or_else(|_| "python".into());
+    let default_lang_guess: String = cellforge_kernel::launcher::find_kernelspec(&kernel_name)
+        .map(|(_, spec)| spec.language.clone())
+        .unwrap_or_else(|_| "python".into());
 
     let (kernel_id, freshly_started) = if let Some(ref nb_key) = nb_canonical {
         // Is there already a shared kernel for this (canonical, language)?
@@ -383,7 +382,10 @@ async fn handle_socket(
             let mut rx = rx;
             while let Ok(event) = rx.recv().await {
                 match event {
-                    crate::state::NotebookEvent::KernelStarted { language, kernel_id } => {
+                    crate::state::NotebookEvent::KernelStarted {
+                        language,
+                        kernel_id,
+                    } => {
                         if s_listener.kernels.lock().await.contains_key(&language) {
                             continue;
                         }

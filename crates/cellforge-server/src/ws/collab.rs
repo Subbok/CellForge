@@ -138,8 +138,7 @@ pub async fn collab_handler(
         Ok(p) => p,
         Err(_) => {
             tracing::warn!("collab: {username} rejected — no access to {}", query.doc);
-            return (axum::http::StatusCode::FORBIDDEN, "no access to notebook")
-                .into_response();
+            return (axum::http::StatusCode::FORBIDDEN, "no access to notebook").into_response();
         }
     };
     let doc_id = canonical.to_string_lossy().to_string();

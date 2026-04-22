@@ -17,11 +17,7 @@ use crate::state::AppState;
 /// 3. Otherwise assume plain HTTP. Safer to skip `Secure` than to set it and
 ///    have browsers drop the cookie on a localhost dev setup.
 fn is_secure_request(headers: &HeaderMap) -> bool {
-    if std::env::var("CELLFORGE_COOKIE_SECURE")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
+    if std::env::var("CELLFORGE_COOKIE_SECURE").ok().as_deref() == Some("1") {
         return true;
     }
     headers
@@ -87,17 +83,13 @@ pub async fn login(
     );
 
     if let Some(retry_after) = state.check_login_rate(&rate_key) {
-        tracing::warn!(
-            "login rate-limited key={rate_key} retry_after={retry_after}s"
-        );
+        tracing::warn!("login rate-limited key={rate_key} retry_after={retry_after}s");
         return (
             StatusCode::TOO_MANY_REQUESTS,
             [(header::RETRY_AFTER, retry_after.to_string())],
             Json(AuthResponse {
                 ok: false,
-                error: Some(format!(
-                    "too many failed attempts, retry in {retry_after}s"
-                )),
+                error: Some(format!("too many failed attempts, retry in {retry_after}s")),
                 user: None,
             }),
         )
@@ -182,8 +174,7 @@ pub async fn register(
             if is_first {
                 // first user = self-registration, log them in
                 let tv = state.users.user_token_version(&user.username);
-                let token =
-                    jwt::create_token_with_version(&user.username, tv).unwrap_or_default();
+                let token = jwt::create_token_with_version(&user.username, tv).unwrap_or_default();
                 let cookie = auth_cookie(&token, &headers);
                 return (
                     StatusCode::OK,

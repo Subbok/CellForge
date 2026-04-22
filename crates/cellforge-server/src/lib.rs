@@ -124,11 +124,7 @@ async fn active_user_check(
     if let Some(claims) = crate::routes::auth::extract_claims(req.headers()) {
         let name = &claims.sub;
         if state.users.user_is_disabled(name) {
-            return (
-                axum::http::StatusCode::UNAUTHORIZED,
-                "account disabled",
-            )
-                .into_response();
+            return (axum::http::StatusCode::UNAUTHORIZED, "account disabled").into_response();
         }
         let current_tv = state.users.user_token_version(name);
         if claims.tv < current_tv {
@@ -170,10 +166,7 @@ async fn origin_check(
             Some(o) => {
                 // Strip scheme from Origin to get host:port; compare to Host
                 // header case-insensitively (RFC 3986: host is case-insensitive).
-                let origin_hostport = o
-                    .split_once("://")
-                    .map(|(_, rest)| rest)
-                    .unwrap_or(o);
+                let origin_hostport = o.split_once("://").map(|(_, rest)| rest).unwrap_or(o);
                 let same_origin = host
                     .map(|h| origin_hostport.eq_ignore_ascii_case(h))
                     .unwrap_or(false);

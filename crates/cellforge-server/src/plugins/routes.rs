@@ -124,11 +124,7 @@ pub async fn upload_plugin(
             // is multi-user.
             let multi_user = state.hub_mode || state.users.list_users().len() > 1;
             let allow_setting = state.plugin_settings.read().allow_user_plugins;
-            let effectively_allowed = if multi_user {
-                false
-            } else {
-                allow_setting
-            };
+            let effectively_allowed = if multi_user { false } else { allow_setting };
             if !effectively_allowed && !is_admin {
                 let reason = if multi_user {
                     "user plugin installation is disabled in multi-user deployments; \

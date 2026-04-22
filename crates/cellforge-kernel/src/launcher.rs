@@ -286,17 +286,26 @@ fn build_sandbox_wrapper(
         "--unshare-cgroup-try".into(),
         "--die-with-parent".into(),
         "--new-session".into(),
-        "--hostname".into(), "cellforge-kernel".into(),
+        "--hostname".into(),
+        "cellforge-kernel".into(),
         // Base filesystem: everything read-only; masked over below.
-        "--ro-bind".into(), "/".into(), "/".into(),
-        "--dev".into(), "/dev".into(),
-        "--proc".into(), "/proc".into(),
-        "--tmpfs".into(), "/tmp".into(),
-        "--tmpfs".into(), "/var/tmp".into(),
-        "--tmpfs".into(), "/run".into(),
+        "--ro-bind".into(),
+        "/".into(),
+        "/".into(),
+        "--dev".into(),
+        "/dev".into(),
+        "--proc".into(),
+        "/proc".into(),
+        "--tmpfs".into(),
+        "/tmp".into(),
+        "--tmpfs".into(),
+        "/var/tmp".into(),
+        "--tmpfs".into(),
+        "/run".into(),
         // Shadow the server's config dir so the kernel cannot read
         // jwt_secret, users.db, settings.json, or other users' data.
-        "--tmpfs".into(), config_dir.display().to_string(),
+        "--tmpfs".into(),
+        config_dir.display().to_string(),
     ]);
 
     // Re-expose built-in Python helpers (cellforge_ui, cellforge) read-only.
@@ -398,7 +407,10 @@ pub async fn launch_kernel(
     // Falls back to the raw argv when disabled or unavailable.
     let sandbox_wrapped = build_sandbox_wrapper(&argv, cwd, extra_pythonpath, &conn_file)?;
     let final_argv: Vec<String> = sandbox_wrapped.unwrap_or_else(|| argv.clone());
-    let sandboxed = final_argv.first().map(|s| s.ends_with("/bwrap")).unwrap_or(false);
+    let sandboxed = final_argv
+        .first()
+        .map(|s| s.ends_with("/bwrap"))
+        .unwrap_or(false);
     if sandboxed {
         tracing::info!("kernel wrapped in bubblewrap sandbox (uid dropped)");
     }
