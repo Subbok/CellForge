@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, type FileEntry } from '../services/api';
 import type { Notebook } from '../lib/types';
-import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Plus, ArrowLeft, Settings, Upload, Pencil, Trash2, Share2, Archive, FolderPlus, Download, X } from 'lucide-react';
+import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Plus, ArrowLeft, Settings, Upload, Pencil, Trash2, Share2, Archive, FolderPlus, Download } from 'lucide-react';
+import { ShareModal } from './ShareModal';
 
 interface Props {
   onOpenNotebook: (path: string, notebook: Notebook) => void;
@@ -415,108 +416,6 @@ export function Dashboard({ onOpenNotebook, onSettings, onBack }: Props) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * Share dialog. Loads the current outbound shares for the target file on
- * open so the user can see who they've already shared with and revoke any
- * of them inline (no round-trip to the recipient's "shared with me" list).
- */
-function ShareModal({
-  fileName,
-  filePath,
-  shareUsers,
-  outboundShares,
-  onClose,
-  onError,
-  onRefresh,
-}: {
-  fileName: string;
-  filePath: string;
-  shareUsers: { username: string; display_name: string }[];
-  outboundShares: { id: number; to_user: string }[];
-  onClose: () => void;
-  onError: (s: string) => void;
-  onRefresh: () => Promise<void>;
-}) {
-  const { t } = useTranslation();
-
-  useEffect(() => {
-    onRefresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath]);
-
-  const sharedWithSet = new Set(outboundShares.map(s => s.to_user));
-  const pickerUsers = shareUsers.filter(u => !sharedWithSet.has(u.username));
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel w-[360px] p-6" onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-text mb-2">Share file</h3>
-        <p className="text-xs text-text-muted mb-4">
-          <strong className="text-text">{fileName}</strong>
-        </p>
-
-        {outboundShares.length > 0 && (
-          <div className="mb-4">
-            <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2">
-              Currently shared with
-            </p>
-            <div className="space-y-1">
-              {outboundShares.map(s => (
-                <div key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-secondary/50">
-                  <span className="text-sm text-text flex-1">@{s.to_user}</span>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await api.unshareFile(s.id);
-                        await onRefresh();
-                      } catch (e: unknown) {
-                        onError(`Unshare failed: ${e instanceof Error ? e.message : String(e)}`);
-                      }
-                    }}
-                    className="p-1 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                    title="Remove share"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2">
-          Share with user
-        </p>
-        {pickerUsers.length === 0 ? (
-          <p className="text-xs text-text-muted py-4 text-center">
-            {shareUsers.length === 0 ? 'No other users' : 'Shared with everyone else already'}
-          </p>
-        ) : (
-          <div className="space-y-1 mb-4">
-            {pickerUsers.map(u => (
-              <button key={u.username} onClick={async () => {
-                try {
-                  await api.shareFile(filePath, u.username);
-                  await onRefresh();
-                } catch (e: unknown) {
-                  onError(`Share failed: ${e instanceof Error ? e.message : String(e)}`);
-                }
-              }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-bg-hover text-sm text-text transition-colors">
-                {u.display_name || u.username} <span className="text-text-muted">@{u.username}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <button onClick={onClose} className="btn btn-md btn-ghost w-full">
-          {t('common.cancel')}
-        </button>
-      </div>
     </div>
   );
 }

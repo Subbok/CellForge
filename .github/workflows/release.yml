@@ -110,46 +110,12 @@ jobs:
       - name: Package AppImage (Linux)
         if: matrix.desktop && runner.os == 'Linux'
         continue-on-error: true
+        env:
+          CELLFORGE_APP_BIN: ${{ github.workspace }}/target/${{ matrix.target }}/release/cellforge-app
+          APPIMAGE_OUT: ${{ github.workspace }}/${{ matrix.artifact }}-desktop.AppImage
         run: |
-          # Download and EXTRACT linuxdeploy (no FUSE on CI runners)
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
-          ./linuxdeploy-x86_64.AppImage --appimage-extract
-          mv squashfs-root linuxdeploy-extracted
-
-          # Download GTK plugin
-          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
-          chmod +x linuxdeploy-plugin-gtk.sh
-
-          # Build AppDir
-          mkdir -p AppDir/usr/bin
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          cp target/${{ matrix.target }}/release/cellforge-app AppDir/usr/bin/cellforge-app
-          chmod +x AppDir/usr/bin/cellforge-app
-          cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/cellforge.png
-
-          # Copy webkit2gtk helper binaries (WebKitNetworkProcess, WebKitWebProcess)
-          # linuxdeploy-plugin-gtk copies the libraries but misses these helpers
-          WEBKIT_LIBEXEC=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
-          if [ -d "$WEBKIT_LIBEXEC" ]; then
-            mkdir -p AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
-            cp -rL "$WEBKIT_LIBEXEC"/* AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/
-          fi
-
-          # Package with extracted linuxdeploy
-          export DEPLOY_GTK_VERSION=3
-          export PATH="$PWD:$PATH"
-          ./linuxdeploy-extracted/AppRun \
-            --appdir AppDir \
-            --plugin gtk \
-            --desktop-file assets/cellforge.desktop \
-            --icon-file assets/icon.png \
-            --output appimage
-
-          # Rename output
-          mv CellForge*.AppImage ${{ matrix.artifact }}-desktop.AppImage 2>/dev/null || \
-          mv cellforge*.AppImage ${{ matrix.artifact }}-desktop.AppImage 2>/dev/null || \
-          mv *.AppImage ${{ matrix.artifact }}-desktop.AppImage
+          sudo apt-get install -y patchelf
+          bash packaging/linux/build-appimage.sh
 
       # --- Package: macOS .dmg ---
 

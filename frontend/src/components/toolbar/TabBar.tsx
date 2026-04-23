@@ -1,10 +1,10 @@
 import { useTabStore } from '../../stores/tabStore';
 import { useNotebookStore } from '../../stores/notebookStore';
-import { saveCurrentTab, restoreTab, removeTabSnapshot } from '../../services/tabManager';
+import { removeTabSnapshot, switchToTab } from '../../services/tabManager';
 import { X } from 'lucide-react';
 
-export function TabBar() {
-  const { tabs, activeTabId, setActiveTab, closeTab } = useTabStore();
+export function TabBar({ username }: { username: string }) {
+  const { tabs, activeTabId, closeTab } = useTabStore();
   const dirty = useNotebookStore(s => s.dirty);
   const filePath = useNotebookStore(s => s.filePath);
 
@@ -12,15 +12,7 @@ export function TabBar() {
 
   function switchTo(id: string) {
     if (id === activeTabId) return;
-    saveCurrentTab();
-    setActiveTab(id);
-    restoreTab(id);
-
-    // update URL
-    const tab = useTabStore.getState().tabs.find(t => t.id === id);
-    if (tab) {
-      window.history.pushState(null, '', `/notebook/${encodeURIComponent(tab.path)}`);
-    }
+    switchToTab(id, username);
   }
 
   function close(e: React.MouseEvent, id: string) {
@@ -29,9 +21,9 @@ export function TabBar() {
     closeTab(id);
     const newActive = useTabStore.getState().activeTabId;
     if (newActive) {
-      restoreTab(newActive);
-      const tab = useTabStore.getState().tabs.find(t => t.id === newActive);
-      if (tab) window.history.pushState(null, '', `/notebook/${encodeURIComponent(tab.path)}`);
+      // Reuse switchToTab semantics so the remaining tab fully re-activates
+      // (snapshot restore + ws reconnect + collab re-init).
+      switchToTab(newActive, username);
     }
   }
 

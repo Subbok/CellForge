@@ -12,8 +12,9 @@ import { api } from '../../services/api';
 import { undo, redo } from '../../services/undoRedo';
 import { broadcastSaved } from '../../services/collaboration';
 
-export function AppLayout({ onGoHome, onExport, onSwitchKernel }: {
+export function AppLayout({ onGoHome, onExport, onSwitchKernel, username }: {
   onGoHome: () => void; onExport: () => void; onSwitchKernel: () => void;
+  username: string;
 }) {
   const sidebarOpen = useUIStore(s => s.sidebarOpen);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -105,7 +106,7 @@ export function AppLayout({ onGoHome, onExport, onSwitchKernel }: {
   return (
     <div className="flex flex-col h-screen min-h-0">
       <TopBar onGoHome={onGoHome} onExport={onExport} onSwitchKernel={onSwitchKernel} />
-      <TabBar />
+      <TabBar username={username} />
       {searchOpen && <SearchBar onClose={() => setSearchOpen(false)} />}
       {shortcutHelp && <ShortcutHelp onClose={() => setShortcutHelp(false)} />}
       <div className="flex flex-1 min-h-0 overflow-hidden">

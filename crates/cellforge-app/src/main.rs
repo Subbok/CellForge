@@ -1,9 +1,34 @@
 use anyhow::Result;
 use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoop};
-use tao::window::WindowBuilder;
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tao::window::{Icon, WindowBuilder};
 use tracing_subscriber::EnvFilter;
 use wry::WebViewBuilder;
+
+const ICON_PNG: &[u8] = include_bytes!("../../../assets/icon.png");
+
+fn load_window_icon() -> Option<Icon> {
+    let decoder = png::Decoder::new(ICON_PNG);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    // png crate can yield RGB or RGBA depending on the source; Icon::from_rgba
+    // wants straight RGBA so expand if needed.
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
+        png::ColorType::Rgb => {
+            let src = &buf[..info.buffer_size()];
+            let mut out = Vec::with_capacity(src.len() / 3 * 4);
+            for chunk in src.chunks_exact(3) {
+                out.extend_from_slice(chunk);
+                out.push(0xff);
+            }
+            out
+        }
+        _ => return None,
+    };
+    Icon::from_rgba(rgba, info.width, info.height).ok()
+}
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -36,9 +61,21 @@ fn main() -> Result<()> {
         });
     });
 
-    let event_loop = EventLoop::new();
+    // Linux: set GTK application ID so Wayland compositors can match the
+    // window to app.cellforge.desktop for title-bar icon and task grouping.
+    // GApplication IDs must follow D-Bus naming (at least one dot, reverse
+    // domain style) — bare "cellforge" is rejected and panics GDK init.
+    let mut event_loop_builder = EventLoopBuilder::new();
+    #[cfg(target_os = "linux")]
+    {
+        use tao::platform::unix::EventLoopBuilderExtUnix;
+        event_loop_builder.with_app_id("app.cellforge");
+    }
+    let event_loop = event_loop_builder.build();
+
     let window = WindowBuilder::new()
         .with_title("CellForge")
+        .with_window_icon(load_window_icon())
         .with_inner_size(tao::dpi::LogicalSize::new(1400.0, 900.0))
         .build(&event_loop)?;
 

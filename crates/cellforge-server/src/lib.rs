@@ -326,6 +326,14 @@ fn build_api_router() -> Router<Arc<AppState>> {
 pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> anyhow::Result<()> {
     let state = Arc::new(AppState::new(&config));
 
+    // Wipe leftover kernel_sessions rows from previous runs. If the server
+    // was killed with live kernels, their rows stay in the DB with their
+    // last-sampled memory_mb and would otherwise inflate admin totals on
+    // this boot — the admin stats query just sums across all rows.
+    if let Err(e) = state.users.clear_kernel_sessions() {
+        tracing::warn!("clear_kernel_sessions at startup: {e}");
+    }
+
     // non-blocking update check
     if !config.no_update_check {
         tokio::spawn(async {
@@ -369,6 +377,31 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
             }
             if killed > 0 {
                 tracing::info!("reaper: killed {killed} idle kernels");
+            }
+        }
+    });
+
+    // Memory sampler: every 15s, walk the running kernels and write their
+    // resident-set-size to kernel_sessions.memory_mb so the admin panel
+    // reflects reality. The column defaults to 0 at insert time and would
+    // otherwise stay there forever. Also prunes DB rows whose id isn't in
+    // the live KernelManager — that way mid-run crashes (where the WS
+    // handler's `remove_kernel_session` never runs) self-heal on the next
+    // sample instead of sticking around and inflating admin totals.
+    let app_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            let samples = {
+                let km = app_state.kernels.lock().await;
+                km.sample_memory()
+            };
+            let live_ids: std::collections::HashSet<String> =
+                samples.iter().map(|(id, _)| id.clone()).collect();
+            let _ = app_state.users.prune_kernel_sessions(&live_ids);
+            for (id, mb) in samples {
+                let _ = app_state.users.update_kernel_session_memory(&id, mb);
             }
         }
     });

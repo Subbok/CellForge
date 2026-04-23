@@ -2,6 +2,9 @@
 /target/
 Cargo.lock
 
+# Local AppImage build output (packaging/linux/build-appimage.sh)
+/build/
+
 # Frontend
 frontend/node_modules/
 frontend/dist/

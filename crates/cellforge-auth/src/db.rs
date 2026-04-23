@@ -832,6 +832,50 @@ impl UserDb {
         Ok(())
     }
 
+    /// Update resident-set-size for a live kernel. Called periodically by the
+    /// server's memory sampler so the admin panel reflects current usage.
+    pub fn update_kernel_session_memory(&self, id: &str, memory_mb: i64) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE kernel_sessions SET memory_mb = ?1 WHERE id = ?2",
+            rusqlite::params![memory_mb, id],
+        )?;
+        Ok(())
+    }
+
+    /// Remove every kernel_sessions row. Called once at server startup — any
+    /// rows present are leftovers from a previous run (server crashed, kernel
+    /// exit path didn't run, etc.) and would otherwise inflate admin totals
+    /// with stale `memory_mb` values from long-dead processes.
+    pub fn clear_kernel_sessions(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM kernel_sessions", [])?;
+        Ok(())
+    }
+
+    /// Delete kernel_sessions rows whose id isn't in `live_ids`. Called by
+    /// the memory sampler so that kernels that died mid-run (without the WS
+    /// handler getting to `remove_kernel_session`) are pruned and no longer
+    /// contribute to the admin totals.
+    pub fn prune_kernel_sessions(&self, live_ids: &std::collections::HashSet<String>) -> Result<()> {
+        let conn = self.conn.lock();
+        let existing_ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM kernel_sessions")?;
+            stmt.query_map([], |row| row.get::<_, String>(0))?
+                .flatten()
+                .collect()
+        };
+        for id in existing_ids {
+            if !live_ids.contains(&id) {
+                let _ = conn.execute(
+                    "DELETE FROM kernel_sessions WHERE id = ?1",
+                    rusqlite::params![id],
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn list_kernel_sessions(&self) -> Vec<KernelSession> {
         let conn = self.conn.lock();
         let mut stmt = conn

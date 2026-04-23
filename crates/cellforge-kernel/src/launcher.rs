@@ -101,7 +101,11 @@ pub fn find_kernelspec(name: &str) -> Result<(PathBuf, KernelSpec)> {
                 || path_str.contains(&format!("\\envs\\{env}\\"))
                 || path_str.ends_with(&format!("/{env}"))
                 || path_str.ends_with(&format!("\\{env}"));
-            if !in_env {
+            // The "base" conda env lives in the conda root (e.g. miniconda3/),
+            // not inside envs/, so the path-pattern check above never matches
+            // it — recognise it by walking up to conda-meta whose parent isn't envs.
+            let is_base_match = env == "base" && is_conda_base_kernelspec(&path);
+            if !in_env && !is_base_match {
                 continue;
             }
         }
@@ -110,6 +114,24 @@ pub fn find_kernelspec(name: &str) -> Result<(PathBuf, KernelSpec)> {
     }
 
     bail!("kernelspec '{name}' not found")
+}
+
+/// True if `spec_dir` sits inside a conda base install (a directory that
+/// contains `conda-meta/` and whose parent is *not* an `envs/` folder).
+fn is_conda_base_kernelspec(spec_dir: &std::path::Path) -> bool {
+    let mut dir = spec_dir;
+    loop {
+        if dir.join("conda-meta").is_dir() {
+            return dir
+                .parent()
+                .map(|p| p.file_name() != Some("envs".as_ref()))
+                .unwrap_or(true);
+        }
+        match dir.parent() {
+            Some(p) if p != dir => dir = p,
+            _ => return false,
+        }
+    }
 }
 
 /// What the host's bubblewrap can actually achieve at runtime.
@@ -756,6 +778,23 @@ fn push_conda_envs_fallback(paths: &mut Vec<PathBuf>) {
             bases.push(PathBuf::from(&pf).join("Anaconda3"));
         }
     }
+    // macOS: GUI-launched apps don't source ~/.zshrc so `conda` isn't in
+    // PATH — Homebrew Casks install conda here and it's otherwise invisible.
+    #[cfg(target_os = "macos")]
+    {
+        bases.push(PathBuf::from("/opt/homebrew/Caskroom/miniconda/base"));
+        bases.push(PathBuf::from("/opt/homebrew/Caskroom/miniforge/base"));
+        bases.push(PathBuf::from("/usr/local/Caskroom/miniconda/base"));
+        bases.push(PathBuf::from("/opt/miniconda3"));
+        bases.push(PathBuf::from("/opt/miniforge3"));
+    }
+    // Linux: common system-wide install locations
+    #[cfg(target_os = "linux")]
+    {
+        bases.push(PathBuf::from("/opt/miniconda3"));
+        bases.push(PathBuf::from("/opt/miniforge3"));
+        bases.push(PathBuf::from("/opt/anaconda3"));
+    }
 
     for base in &bases {
         // base env
@@ -772,6 +811,23 @@ fn push_conda_envs_fallback(paths: &mut Vec<PathBuf>) {
                 if p.exists() && !paths.contains(&p) {
                     paths.push(p);
                 }
+            }
+        }
+    }
+
+    // Catch-all: conda writes every env it has ever created to this file,
+    // one absolute path per line. Picks up envs installed in non-standard
+    // locations (e.g. --prefix /Volumes/ExternalSSD/envs/xyz).
+    let env_list = home.join(".conda/environments.txt");
+    if let Ok(text) = std::fs::read_to_string(&env_list) {
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let p = PathBuf::from(line).join("share/jupyter");
+            if p.exists() && !paths.contains(&p) {
+                paths.push(p);
             }
         }
     }

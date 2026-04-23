@@ -2,7 +2,7 @@
 
 > A modern notebook IDE — Rust backend, React frontend, real Jupyter kernels, reactive execution, and PDF export via Typst.
 
-![version](https://img.shields.io/badge/version-1.0.0-blue)
+![version](https://img.shields.io/badge/version-1.1.0-blue)
 ![rust](https://img.shields.io/badge/rust-2024-orange)
 ![react](https://img.shields.io/badge/react-19-61dafb)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-green)

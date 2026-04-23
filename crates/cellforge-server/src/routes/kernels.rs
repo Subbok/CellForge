@@ -181,32 +181,80 @@ fn find_conda_envs_without_kernel() -> Vec<(String, std::path::PathBuf)> {
             bases.push(std::path::PathBuf::from(&pf).join("Anaconda3"));
         }
     }
+    // macOS: Homebrew casks + common system-wide locations. Desktop app
+    // launched from Finder has no PATH, so these have to be checked explicitly.
+    #[cfg(target_os = "macos")]
+    {
+        bases.push(std::path::PathBuf::from(
+            "/opt/homebrew/Caskroom/miniconda/base",
+        ));
+        bases.push(std::path::PathBuf::from(
+            "/opt/homebrew/Caskroom/miniforge/base",
+        ));
+        bases.push(std::path::PathBuf::from(
+            "/usr/local/Caskroom/miniconda/base",
+        ));
+        bases.push(std::path::PathBuf::from("/opt/miniconda3"));
+        bases.push(std::path::PathBuf::from("/opt/miniforge3"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        bases.push(std::path::PathBuf::from("/opt/miniconda3"));
+        bases.push(std::path::PathBuf::from("/opt/miniforge3"));
+        bases.push(std::path::PathBuf::from("/opt/anaconda3"));
+    }
 
     let mut out = vec![];
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+
+    let mut consider = |p: std::path::PathBuf, name: String| {
+        if seen.contains(&p) {
+            return;
+        }
+        let has_python = if cfg!(windows) {
+            p.join("Scripts/python.exe").exists() || p.join("python.exe").exists()
+        } else {
+            p.join("bin/python").exists()
+        };
+        if !has_python {
+            return;
+        }
+        if p.join("share/jupyter/kernels").is_dir() {
+            return;
+        }
+        seen.insert(p.clone());
+        out.push((name, p));
+    };
+
     for base in &bases {
         let envs_dir = base.join("envs");
         let Ok(entries) = std::fs::read_dir(&envs_dir) else {
             continue;
         };
         for entry in entries.flatten() {
-            let p = entry.path();
-            // has python?
-            let has_python = if cfg!(windows) {
-                p.join("Scripts/python.exe").exists() || p.join("python.exe").exists()
-            } else {
-                p.join("bin/python").exists()
-            };
-            if !has_python {
-                continue;
-            }
-            // already has a kernelspec?
-            if p.join("share/jupyter/kernels").is_dir() {
-                continue;
-            }
             let name = entry.file_name().to_string_lossy().to_string();
-            out.push((name, p));
+            consider(entry.path(), name);
         }
     }
+
+    // Catch-all: ~/.conda/environments.txt lists every env conda knows about,
+    // including --prefix envs outside the standard bases directories.
+    let env_list = home.join(".conda/environments.txt");
+    if let Ok(text) = std::fs::read_to_string(&env_list) {
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let p = std::path::PathBuf::from(line);
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "env".into());
+            consider(p, name);
+        }
+    }
+
     out
 }
 

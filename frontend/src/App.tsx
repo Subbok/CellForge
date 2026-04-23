@@ -235,7 +235,7 @@ function App() {
             useKernelStore.getState().setSpec(savedKernel);
             useNotebookStore.getState().loadNotebook(nbPath, nb);
             const name = nbPath.split('/').pop() ?? 'Untitled';
-            useTabStore.getState().addTab(nbPath, name);
+            useTabStore.getState().addTab(nbPath, name, savedKernel);
             // always start collab so multiple users can edit together
             initCollaboration(nbPath, username ?? 'anonymous');
             setStageRaw('ready');
@@ -351,7 +351,7 @@ function App() {
             saveCurrentTab();
             useNotebookStore.getState().loadNotebook(pending.path, pending.nb);
             const name = pending.path.split('/').pop() ?? 'Untitled';
-            useTabStore.getState().addTab(pending.path, name);
+            useTabStore.getState().addTab(pending.path, name, kernelName);
             // always start collab so multiple users can edit together
             initCollaboration(pending.path, user?.username ?? 'anonymous');
             setPending(null);
@@ -379,7 +379,12 @@ function App() {
 
   return (
     <>
-      <AppLayout onGoHome={goHome} onExport={() => setShowExport(true)} onSwitchKernel={() => setShowKernelSwitch(true)} />
+      <AppLayout
+        onGoHome={goHome}
+        onExport={() => setShowExport(true)}
+        onSwitchKernel={() => setShowKernelSwitch(true)}
+        username={user?.username ?? 'anonymous'}
+      />
       {showExport && <ExportModal onClose={() => setShowExport(false)} />}
       {showKernelSwitch && (
         <KernelPicker

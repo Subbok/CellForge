@@ -209,6 +209,28 @@ impl KernelManager {
         self.start(&spec_name, cwd.as_deref(), &extras).await
     }
 
+    /// Returns `(kernel_id, rss_mb)` for every running kernel, summing the
+    /// resident-set-size of the kernel process and every descendant it
+    /// spawned (so `multiprocessing` workers, torch DataLoader subprocs, etc.
+    /// show up in the admin panel). Cross-platform via `sysinfo` — works on
+    /// Linux / macOS / Windows with the same code path.
+    pub fn sample_memory(&self) -> Vec<(String, i64)> {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+        self.kernels
+            .iter()
+            .map(|(id, k)| {
+                let bytes = k
+                    .child
+                    .id()
+                    .map(|pid| tree_rss_bytes(&sys, sysinfo::Pid::from_u32(pid)))
+                    .unwrap_or(0);
+                (id.clone(), (bytes / 1024 / 1024) as i64)
+            })
+            .collect()
+    }
+
     pub async fn interrupt(&mut self, id: &str) -> Result<()> {
         let kernel = self.kernels.get_mut(id).context("no such kernel")?;
         if let Some(pid) = kernel.child.id() {
@@ -240,4 +262,69 @@ impl Default for KernelManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Sum the memory usage of `root` and every descendant process in `sys`.
+/// BFS over parent-pointer relationships; each process visited at most once.
+///
+/// Uses **PSS** (proportional set size) on Linux — shared pages from fork()
+/// are split across consumers so a multiprocessing pool reports its actual
+/// unique footprint, not N × the parent's RSS. Non-Linux falls back to RSS
+/// via sysinfo, which over-reports by the shared-page overlap but is still
+/// the right order of magnitude.
+///
+/// Threads are skipped — sysinfo enumerates userland threads alongside
+/// processes, and each thread reports the same PSS as its task-group leader.
+/// Summing a 12-threaded Python kernel without this filter over-reports by
+/// ~12×; see `Process::thread_kind`.
+fn tree_rss_bytes(sys: &sysinfo::System, root: sysinfo::Pid) -> u64 {
+    let mut pending = vec![root];
+    let mut visited = std::collections::HashSet::new();
+    let mut total = 0u64;
+    while let Some(pid) = pending.pop() {
+        if !visited.insert(pid) {
+            continue;
+        }
+        let is_thread = sys
+            .process(pid)
+            .and_then(|p| p.thread_kind())
+            .is_some();
+        if !is_thread {
+            total = total.saturating_add(process_memory_bytes(sys, pid));
+        }
+        for (child_pid, child_proc) in sys.processes() {
+            if child_proc.parent() == Some(pid) && !visited.contains(child_pid) {
+                pending.push(*child_pid);
+            }
+        }
+    }
+    total
+}
+
+#[cfg(target_os = "linux")]
+fn process_memory_bytes(sys: &sysinfo::System, pid: sysinfo::Pid) -> u64 {
+    // Prefer PSS — it accurately divides shared pages so summing across a
+    // multiprocessing tree yields the real unique memory footprint. Needs
+    // smaps_rollup (kernel 4.14+) and read access to the process.
+    let path = format!("/proc/{}/smaps_rollup", pid.as_u32());
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("Pss:")
+                && let Some(kb) = rest
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<u64>().ok())
+            {
+                return kb * 1024;
+            }
+        }
+    }
+    // Fallback if smaps_rollup is missing (e.g. process just exited, or /proc
+    // is masked inside a restricted sandbox).
+    sys.process(pid).map(|p| p.memory()).unwrap_or(0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_memory_bytes(sys: &sysinfo::System, pid: sysinfo::Pid) -> u64 {
+    sys.process(pid).map(|p| p.memory()).unwrap_or(0)
 }

@@ -21,3 +21,7 @@ futures = "0.3"
 cellforge-config = { path = "../cellforge-config" }
 dirs = "6"
 libc = "0.2"
+# Cross-platform process memory sampling for the admin panel. Default features
+# include only the pieces we use (process enumeration + per-process RSS), so
+# no disk/network/CPU collectors get dragged in.
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }

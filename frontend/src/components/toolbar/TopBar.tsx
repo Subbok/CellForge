@@ -1,4 +1,5 @@
-import { Play, PlayCircle, RotateCcw, Square, Save, Eraser, Download, PanelRightClose, PanelRightOpen, LayoutTemplate, Code2, Cpu, ChevronDown, Plug } from 'lucide-react';
+import { Play, PlayCircle, RotateCcw, Square, Save, Eraser, Download, PanelRightClose, PanelRightOpen, LayoutTemplate, Code2, Cpu, ChevronDown, Plug, Share2 } from 'lucide-react';
+import { useState } from 'react';
 import { useNotebookStore } from '../../stores/notebookStore';
 import { useKernelStore } from '../../stores/kernelStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -11,6 +12,7 @@ import { api } from '../../services/api';
 import { broadcastCellOp, broadcastSaved, isActive as isCollabActive } from '../../services/collaboration';
 import { FileName } from './FileName';
 import { PresenceIndicator } from './PresenceIndicator';
+import { ShareModal } from '../ShareModal';
 
 function kernelDot(status: string) {
   if (status === 'idle') return 'bg-success';
@@ -46,6 +48,21 @@ export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
   const { sidebarOpen, toggleSidebar, appMode, toggleAppMode } = useUIStore();
   const pluginButtons = useUIStore(s => s.pluginToolbarButtons);
   const execute = useExecuteCell();
+
+  // Share modal state — opens over the notebook when the user clicks the
+  // share button in the top bar. Data is loaded lazily on open.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareUsers, setShareUsers] = useState<{ username: string; display_name: string }[]>([]);
+  const [outboundShares, setOutboundShares] = useState<{ id: number; to_user: string }[]>([]);
+  const [shareError, setShareError] = useState<string>('');
+
+  async function openShare() {
+    const filePath = useNotebookStore.getState().filePath;
+    if (!filePath) return;
+    setShareError('');
+    setShareOpen(true);
+    api.shareUsers().then(setShareUsers).catch(() => {});
+  }
 
   function runActiveCell() {
     const cell = cells.find(c => c.id === activeCellId);
@@ -115,6 +132,7 @@ export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
         }}><Square size={16} /></Btn>
         <div className="h-4 w-px bg-border/50 mx-0.5" />
         <Btn title="Save (Ctrl+S)" onClick={save} disabled={!dirty}><Save size={16} /></Btn>
+        <Btn title="Share" onClick={openShare}><Share2 size={16} /></Btn>
         <Btn title="Export" onClick={onExport}><Download size={16} /></Btn>
         <div className="h-4 w-px bg-border/50 mx-0.5" />
         <button
@@ -177,6 +195,30 @@ export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
       <Btn title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'} onClick={toggleSidebar}>
         {sidebarOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
       </Btn>
+
+      {shareOpen && (() => {
+        const fp = useNotebookStore.getState().filePath ?? '';
+        const fileName = fp.split('/').pop() ?? '';
+        return (
+          <ShareModal
+            fileName={fileName}
+            filePath={fp}
+            shareUsers={shareUsers}
+            outboundShares={outboundShares}
+            onClose={() => setShareOpen(false)}
+            onError={setShareError}
+            onRefresh={async () => {
+              try { setOutboundShares(await api.sharesByMe(fileName)); }
+              catch { setOutboundShares([]); }
+            }}
+          />
+        );
+      })()}
+      {shareError && (
+        <div className="fixed bottom-4 right-4 px-3 py-2 bg-error/10 border border-error/30 text-error text-xs rounded-lg shadow-lg z-50">
+          {shareError}
+        </div>
+      )}
     </header>
   );
 }
