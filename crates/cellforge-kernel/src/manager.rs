@@ -285,10 +285,7 @@ fn tree_rss_bytes(sys: &sysinfo::System, root: sysinfo::Pid) -> u64 {
         if !visited.insert(pid) {
             continue;
         }
-        let is_thread = sys
-            .process(pid)
-            .and_then(|p| p.thread_kind())
-            .is_some();
+        let is_thread = sys.process(pid).and_then(|p| p.thread_kind()).is_some();
         if !is_thread {
             total = total.saturating_add(process_memory_bytes(sys, pid));
         }

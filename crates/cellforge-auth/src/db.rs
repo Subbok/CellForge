@@ -857,7 +857,10 @@ impl UserDb {
     /// the memory sampler so that kernels that died mid-run (without the WS
     /// handler getting to `remove_kernel_session`) are pruned and no longer
     /// contribute to the admin totals.
-    pub fn prune_kernel_sessions(&self, live_ids: &std::collections::HashSet<String>) -> Result<()> {
+    pub fn prune_kernel_sessions(
+        &self,
+        live_ids: &std::collections::HashSet<String>,
+    ) -> Result<()> {
         let conn = self.conn.lock();
         let existing_ids: Vec<String> = {
             let mut stmt = conn.prepare("SELECT id FROM kernel_sessions")?;
