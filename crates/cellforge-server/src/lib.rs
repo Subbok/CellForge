@@ -134,6 +134,10 @@ async fn active_user_check(
             )
                 .into_response();
         }
+        // Touch last_seen on every authenticated request so the Admin members
+        // table can show "active 3m ago" relative timestamps. Best-effort —
+        // a transient lock failure is not worth blocking the request for.
+        state.users.touch_last_seen(name);
     }
     next.run(req).await
 }
@@ -263,6 +267,7 @@ fn build_api_router() -> Router<Arc<AppState>> {
         .route("/files/share-users", get(fileops::share_users))
         .route("/files", get(files::list_root))
         .route("/files/{*path}", get(files::list))
+        .route("/quota", get(files::quota))
         // plugin management
         .route("/plugins", get(plugin_routes::list_plugins))
         .route(
@@ -284,13 +289,17 @@ fn build_api_router() -> Router<Arc<AppState>> {
         // Dashboard
         .route("/dashboard", get(dashboard::dashboard))
         .route("/dashboard/kernels", get(dashboard::dashboard_kernels))
+        .route("/activity", get(dashboard::activity))
         .route(
             "/kernels/{id}/stop",
             axum::routing::post(dashboard::stop_kernel),
         )
         // Admin
         .route("/admin/stats", get(admin::stats))
-        .route("/admin/users", get(admin::list_users))
+        .route(
+            "/admin/users",
+            get(admin::list_users).post(admin::create_user),
+        )
         .route(
             "/admin/users/{username}",
             axum::routing::put(admin::update_user),
@@ -381,28 +390,57 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
         }
     });
 
-    // Memory sampler: every 15s, walk the running kernels and write their
-    // resident-set-size to kernel_sessions.memory_mb so the admin panel
-    // reflects reality. The column defaults to 0 at insert time and would
-    // otherwise stay there forever. Also prunes DB rows whose id isn't in
-    // the live KernelManager — that way mid-run crashes (where the WS
-    // handler's `remove_kernel_session` never runs) self-heal on the next
-    // sample instead of sticking around and inflating admin totals.
+    // Activity log pruner: keep last 30 days. Once-per-day cadence is
+    // plenty since the table is append-only and a few extra days of rows
+    // don't matter — the periodic delete just bounds growth.
+    let prune_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+        // First tick fires immediately — clean whatever we've accumulated
+        // across past restarts.
+        loop {
+            interval.tick().await;
+            let _ = prune_state.users.prune_activity(30);
+        }
+    });
+
+    // Metrics sampler: every 15s walks the running kernels and writes
+    // memory_mb + cpu_pct to kernel_sessions. The columns default to 0 at
+    // insert time and would otherwise stay there forever.
+    //
+    // The `sysinfo::System` is held across iterations because
+    // `Process::cpu_usage()` reports the delta since the previous refresh.
+    // A fresh System always reads 0%, which we hide by skipping the first
+    // tick after start.
+    //
+    // The sampler also prunes DB rows whose id isn't in the live
+    // KernelManager — that way mid-run crashes (where the WS handler's
+    // `remove_kernel_session` never runs) self-heal on the next sample
+    // instead of inflating admin totals.
     let app_state = state.clone();
     tokio::spawn(async move {
+        let mut sys = sysinfo::System::new();
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut first = true;
         loop {
             interval.tick().await;
             let samples = {
                 let km = app_state.kernels.lock().await;
-                km.sample_memory()
+                km.sample_metrics(&mut sys)
             };
             let live_ids: std::collections::HashSet<String> =
-                samples.iter().map(|(id, _)| id.clone()).collect();
+                samples.iter().map(|(id, _, _)| id.clone()).collect();
             let _ = app_state.users.prune_kernel_sessions(&live_ids);
-            for (id, mb) in samples {
-                let _ = app_state.users.update_kernel_session_memory(&id, mb);
+            for (id, mb, cpu) in samples {
+                // First tick has no CPU baseline yet, so cpu sample is 0
+                // regardless of actual load — skip the write to avoid
+                // momentarily clearing a previous run's stored value.
+                let cpu_to_write = if first { 0 } else { cpu };
+                let _ = app_state
+                    .users
+                    .update_kernel_session_metrics(&id, mb, cpu_to_write);
             }
+            first = false;
         }
     });
 

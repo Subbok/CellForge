@@ -1,46 +1,49 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────────────────────
-   Theme tokens — Crisp baseline.
+   Theme tokens — Forge baseline (pure-black, violet accent).
    - Accent colors (`--color-accent`, `--color-accent-hover`,
-     `--color-cell-active`) are overridden at runtime via an
-     inline style on <html>, driven by the user's accent pick.
-   - Non-accent tokens stay fixed so the UI density never jumps
-     when you change accent color.
+     `--color-cell-active`, `--color-accent-fg`) are overridden
+     at runtime via an inline style on <html>, driven by the
+     user's accent pick (see App.tsx).
+   - Surface tokens here describe the dark-on-black ladder:
+     bg → bg-secondary (cards) → bg-elevated (inputs) → bg-hover.
    ───────────────────────────────────────────────────────────── */
 @theme {
-  --color-bg: #13141b;
-  --color-bg-secondary: #161823;
-  --color-bg-hover: #2b2e3d;
-  /* code and output use distinct shades so the framed cell has a visible
-     inner divider; both sit on an elevated surface vs. the page bg */
-  --color-bg-elevated: #242736;
-  --color-bg-output: #161823;
-  --color-border: #3f4154;
-  --color-text: #ebedf2;
-  --color-text-secondary: #a8adba;
-  --color-text-muted: #7d8390;
-  --color-accent: #7a99ff;
-  --color-accent-hover: #6485ff;
+  /* Forge surface ladder — derived from #0a0b0d (JSX FF_DEFAULTS) by
+     mixing each step toward white. Matches the rendered handoff designs;
+     the README's pure-black baseline is too contrasty against the lifted
+     surfaces. */
+  --color-bg: #0a0b0d;
+  --color-bg-secondary: #1c1d20;     /* cards */
+  --color-bg-elevated: #2a2b2e;      /* inputs, sub-rows */
+  --color-bg-hover: #3a3b3e;         /* hover, active */
+  --color-bg-output: #1c1d20;        /* notebook output area */
+  --color-border: rgba(255, 255, 255, 0.10);         /* input borders */
+  --color-border-subtle: rgba(255, 255, 255, 0.06);  /* hairlines, dividers */
+  --color-text: #f4f5f7;
+  --color-text-secondary: rgba(255, 255, 255, 0.72);
+  --color-text-muted: rgba(255, 255, 255, 0.46);
+  --color-accent: #a78bfa;
+  --color-accent-hover: #8b6df0;
   /* Foreground color for text/icons that sit ON an accent background.
      Flipped at runtime between white and near-black based on the
      accent's luminance (see App.tsx). */
-  --color-accent-fg: #ffffff;
-  --color-success: #34d399;
+  --color-accent-fg: #0a0a0a;
+  --color-success: #4ade80;
+  --color-info: #60a5fa;
   --color-warning: #fbbf24;
-  --color-error: #f87171;
-  --color-cell-active: #7a99ff;
+  --color-error: #ef4444;
+  --color-cell-active: #a78bfa;
   --color-cell-stale: #fbbf24;
   --color-cell-running: #a78bfa;
 
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
 
-  /* Fixed density — one value, never changes per theme. */
-  --ui-root-size: 16.5px;
+  /* All cards, buttons, inputs, modals use rounded-lg → 10px (Forge). */
+  --radius-lg: 10px;
 }
-
-html { font-size: var(--ui-root-size); }
 
 /* ─────────────────────────────────────────────────────────────
    UI primitives — the canonical shapes for buttons, inputs,
@@ -88,9 +91,11 @@ html { font-size: var(--ui-root-size); }
   /* ── modal shell ─────────────────────────────────── */
   .modal-backdrop {
     @apply fixed inset-0 bg-black/60 flex items-center justify-center z-50;
+    animation: ff-modal-backdrop-in 180ms ease-out;
   }
   .modal-panel {
     @apply bg-bg-secondary border border-border rounded-xl shadow-2xl;
+    animation: ff-modal-panel-in 200ms ease-out;
   }
 
   /* ── section headings (Settings-style) ──────────── */
@@ -160,6 +165,10 @@ input[type="checkbox"]:hover {
 
 body {
   font-family: var(--font-sans);
+  /* Forge body scale: 13px / 1.5 — handoff baseline. Tailwind text-* utilities
+     resolve from the root 16px, this only sets the default for unstyled text. */
+  font-size: 13px;
+  line-height: 1.5;
   background: var(--color-bg);
   color: var(--color-text);
   margin: 0;
@@ -359,6 +368,17 @@ body {
 .prose img {
   max-width: 100%;
   border-radius: 6px;
+}
+
+/* modal/palette open animations — backdrop fades, panel slides up 8px + fades.
+   Reused across .modal-backdrop / .modal-panel and the command palette. */
+@keyframes ff-modal-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes ff-modal-panel-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* cell appear/move animation */

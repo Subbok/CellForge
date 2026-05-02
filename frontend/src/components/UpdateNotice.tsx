@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
-import { ArrowUpRight, X, Anvil } from 'lucide-react';
+import { ArrowUpRight, X } from 'lucide-react';
+import { BrandMark } from './brand/BrandMark';
 
 const DISMISSED_KEY = 'cellforge_dismissed_update';
 
@@ -48,8 +49,8 @@ export function UpdateNotice() {
 
         <div className="pl-5 pr-4 py-4">
           <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0 mt-0.5">
-              <Anvil size={16} className="text-accent" />
+            <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0 mt-0.5 text-text">
+              <BrandMark size={16} />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-text">

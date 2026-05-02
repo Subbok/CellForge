@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Variable, FolderTree, ListTree, History, Network, X, Plug, Bot, GitBranch } from 'lucide-react';
+import { Variable, FolderTree, ListTree, History, Network, X, Plug, Bot, GitBranch, Rows2 } from 'lucide-react';
 import { useUIStore, type SidebarTab } from '../../stores/uiStore';
 import { VariableExplorer } from '../sidebar/VariableExplorer';
 import { SidebarFiles } from '../sidebar/SidebarFiles';
@@ -22,7 +22,8 @@ const BUILTIN_TABS: TabDef[] = [
   { id: 'ai',           label: 'AI',           Icon: Bot },
 ];
 
-/** Merge built-in tabs with plugin-contributed sidebar panels. */
+/** Merge built-in tabs with plugin-contributed sidebar panels. AI is hidden
+ *  unless the user has actually configured a provider. */
 function useTabs(): TabDef[] {
   const pluginPanels = useUIStore(s => s.pluginSidebarPanels);
   const aiKey = useUIStore(s => s.aiApiKey);
@@ -75,8 +76,14 @@ function PluginPanelHost({ panelId }: { panelId: string }) {
   return <div ref={ref} className="h-full" />;
 }
 
-/** The whole sidebar column: resize handle → content. */
-export function Sidebar() {
+/**
+ * Notebook sidebar — thin vertical icon rail (56px) plus a resizable content
+ * panel. Right-clicking a rail icon promotes/demotes that tab as a secondary
+ * split panel below the active one. Whether the rail sits left-of or
+ * right-of the panel is decided by the caller via the `side` prop, so it
+ * cooperates with the user's `sidebarSide` preference.
+ */
+export function Sidebar({ side }: { side: 'left' | 'right' }) {
   const tabs = useTabs();
   const sidebarTab = useUIStore(s => s.sidebarTab);
   const secondaryTab = useUIStore(s => s.sidebarSecondaryTab);
@@ -87,13 +94,15 @@ export function Sidebar() {
   const splitRatio = useUIStore(s => s.sidebarSplitRatio);
   const setSplitRatio = useUIStore(s => s.setSidebarSplitRatio);
 
-  // horizontal (width) resize
+  // Width drag — direction depends on which side the sidebar lives on.
+  // Handle sits on the inner edge (right edge when side='left', left edge
+  // when side='right'). Dragging towards the centre always grows the panel.
   function onWidthDragStart(e: React.MouseEvent) {
     const startX = e.clientX;
     const startW = width;
     function onMove(ev: MouseEvent) {
-      // dragging LEFT grows the sidebar (the handle sits on the left edge)
-      setWidth(startW + (startX - ev.clientX));
+      const delta = side === 'right' ? (startX - ev.clientX) : (ev.clientX - startX);
+      setWidth(startW + delta);
     }
     function onUp() {
       document.body.style.cursor = '';
@@ -107,41 +116,61 @@ export function Sidebar() {
     e.preventDefault();
   }
 
+  const dragHandle = (
+    <div
+      onMouseDown={onWidthDragStart}
+      className="w-1 shrink-0 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
+    />
+  );
+
+  const iconRail = (
+    <IconRail
+      tabs={tabs}
+      current={sidebarTab}
+      secondary={secondaryTab}
+      onSelect={setTab}
+      onToggleSplit={setSecondary}
+    />
+  );
+
+  const panel = (
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+      {secondaryTab
+        ? <SplitPanels
+            top={sidebarTab}
+            bottom={secondaryTab}
+            ratio={splitRatio}
+            setRatio={setSplitRatio}
+            onCloseBottom={() => setSecondary(null)}
+          />
+        : <div className="flex-1 min-h-0 overflow-y-auto p-3"><PanelBody tab={sidebarTab} /></div>
+      }
+    </div>
+  );
+
+  // Layout: when the sidebar is on the LEFT, drag handle sits on its right
+  // edge (between panel and main content). On the RIGHT, drag handle is on
+  // its left edge. Icon rail always renders adjacent to the page edge.
   return (
     <div className="flex h-full min-h-0 w-full">
-      {/* drag handle to resize sidebar width */}
-      <div
-        onMouseDown={onWidthDragStart}
-        className="w-1 shrink-0 cursor-col-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
-      />
-
-      <div className="flex flex-col h-full min-h-0 flex-1 min-w-0">
-        {/* tab strip — icon-only to fit 5 tabs in any width */}
-        <TabStrip
-          tabs={tabs}
-          current={sidebarTab}
-          secondary={secondaryTab}
-          onSelect={setTab}
-          onToggleSplit={setSecondary}
-        />
-
-        {/* stacked panels */}
-        {secondaryTab
-          ? <SplitPanels
-              top={sidebarTab}
-              bottom={secondaryTab}
-              ratio={splitRatio}
-              setRatio={setSplitRatio}
-              onCloseBottom={() => setSecondary(null)}
-            />
-          : <div className="flex-1 min-h-0 overflow-y-auto p-3"><PanelBody tab={sidebarTab} /></div>
-        }
-      </div>
+      {side === 'left' ? (
+        <>
+          {iconRail}
+          {panel}
+          {dragHandle}
+        </>
+      ) : (
+        <>
+          {dragHandle}
+          {panel}
+          {iconRail}
+        </>
+      )}
     </div>
   );
 }
 
-function TabStrip({
+function IconRail({
   tabs, current, secondary, onSelect, onToggleSplit,
 }: {
   tabs: TabDef[];
@@ -151,30 +180,78 @@ function TabStrip({
   onToggleSplit: (t: SidebarTab | null) => void;
 }) {
   return (
-    <div className="flex border-b border-border shrink-0">
+    <div
+      className="flex flex-col items-center shrink-0"
+      style={{
+        width: 56,
+        background: 'var(--color-bg-secondary)',
+        padding: '12px 0',
+        gap: 4,
+        borderLeft: '1px solid var(--color-border-subtle)',
+        borderRight: '1px solid var(--color-border-subtle)',
+      }}
+    >
       {tabs.map(({ id, label, Icon }) => {
         const isPrimary = current === id;
         const isSecondary = secondary === id;
         const active = isPrimary || isSecondary;
         return (
-          <button
+          <div
             key={id}
-            onClick={() => onSelect(id as SidebarTab)}
-            onContextMenu={(e) => {
-              // right-click adds/removes the panel as a secondary split panel
-              e.preventDefault();
-              if (id === current) return; // can't split the same panel as itself
-              onToggleSplit(isSecondary ? null : id as SidebarTab);
-            }}
-            title={`${label}${id === current ? '' : '  (right-click: split view)'}`}
-            className={`flex-1 flex items-center justify-center h-9 text-xs font-medium transition-colors
-              ${active ? 'text-accent' : 'text-text-muted hover:text-text-secondary'}
-              ${isPrimary ? 'border-b-2 border-accent' : ''}
-              ${isSecondary && !isPrimary ? 'border-b-2 border-accent/40' : ''}
-            `}
+            className="group relative"
+            style={{ width: 36, height: 36 }}
           >
-            <Icon size={14} />
-          </button>
+            <button
+              onClick={() => onSelect(id as SidebarTab)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (id === current) return;
+                onToggleSplit(isSecondary ? null : id as SidebarTab);
+              }}
+              title={label}
+              style={{
+                width: 36, height: 36, borderRadius: 8,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: isPrimary ? 'var(--color-bg-hover)' : 'transparent',
+                color: active ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                border: 'none', cursor: 'pointer',
+                transition: 'background 120ms ease, color 120ms ease',
+              }}
+            >
+              <Icon size={17} />
+            </button>
+
+            {/* Split-view affordance — hover-revealed mini button at the
+                bottom-right corner. Clicking pins this panel as the
+                secondary half of a split view (or unpins it). Right-click on
+                the icon itself does the same thing for keyboard-free users. */}
+            {!isPrimary && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleSplit(isSecondary ? null : id as SidebarTab);
+                }}
+                title={isSecondary ? 'Remove from split view' : 'Add as split view'}
+                className={`absolute -bottom-0.5 -right-0.5 transition-opacity ${
+                  isSecondary ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}
+                style={{
+                  width: 16, height: 16, borderRadius: 4,
+                  background: isSecondary
+                    ? 'var(--color-accent)'
+                    : 'var(--color-bg-elevated)',
+                  border: '1px solid var(--color-border)',
+                  color: isSecondary
+                    ? 'var(--color-accent-fg)'
+                    : 'var(--color-text-secondary)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <Rows2 size={9} />
+              </button>
+            )}
+          </div>
         );
       })}
     </div>
@@ -226,10 +303,19 @@ function SplitPanels({
 
       <div
         onMouseDown={() => setDragging(true)}
-        className="h-1 shrink-0 cursor-row-resize hover:bg-accent/40 active:bg-accent/60 border-y border-border bg-bg-elevated transition-colors"
+        className="h-1 shrink-0 cursor-row-resize hover:bg-accent/40 active:bg-accent/60 transition-colors"
+        style={{
+          background: 'var(--color-bg-elevated)',
+          borderTop: '1px solid var(--color-border-subtle)',
+          borderBottom: '1px solid var(--color-border-subtle)',
+        }}
       />
 
-      <div className="flex items-center justify-between px-2 py-1 text-[10px] uppercase tracking-wide text-text-muted border-b border-border bg-bg-elevated/40 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-wide text-text-muted shrink-0"
+        style={{
+          background: 'var(--color-bg-secondary)',
+          borderBottom: '1px solid var(--color-border-subtle)',
+        }}>
         <span>{tabs.find(t => t.id === bottom)?.label}</span>
         <button
           onClick={onCloseBottom}

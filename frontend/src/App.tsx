@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppLayout } from './components/layout/AppLayout';
 import { Dashboard } from './components/Dashboard';
@@ -19,20 +19,34 @@ import { registerBuiltinRenderers } from './plugins/builtins';
 import { loadPluginModules } from './plugins/loader';
 import { useTabStore } from './stores/tabStore';
 import { saveCurrentTab } from './services/tabManager';
+import { queueCells, clearQueue } from './services/executionQueue';
 import { api } from './services/api';
 import type { Notebook } from './lib/types';
 import { LoginPage } from './components/LoginPage';
 import { HomeDashboard } from './components/HomeDashboard';
 import { AdminPanel } from './components/AdminPanel';
 import { UpdateNotice } from './components/UpdateNotice';
+import { AppShell } from './components/layout/AppShell';
+import type { NavStage } from './components/layout/FFNav';
+import { CommandPalette } from './components/CommandPalette';
 
 type Stage = 'loading' | 'login' | 'home' | 'browse' | 'kernel' | 'ready' | 'settings' | 'admin';
 
 function stageFromUrl(): Stage {
   const path = window.location.pathname;
   if (path === '/settings') return 'settings';
+  if (path === '/admin') return 'admin';
   if (path.startsWith('/notebook/')) return 'kernel';
   if (path === '/browse') return 'browse';
+  return 'home';
+}
+
+/** Map a Stage to the NavStage shown as active in FFNav. */
+function navStageFor(stage: Stage): NavStage {
+  if (stage === 'ready') return 'notebook';
+  if (stage === 'browse') return 'browse';
+  if (stage === 'settings') return 'settings';
+  if (stage === 'admin') return 'admin';
   return 'home';
 }
 
@@ -71,12 +85,14 @@ function pickAccentFg(hex: string): string {
 function App() {
   const { t } = useTranslation();
   const [stage, setStageRaw] = useState<Stage>('loading');
-  const [user, setUser] = useState<{ username: string; is_admin: boolean } | null>(null);
+  const [user, setUser] = useState<{ username: string; is_admin: boolean; is_super_admin?: boolean } | null>(null);
   const [isFirstUser, setIsFirstUser] = useState(false);
   const [pending, setPending] = useState<{ path: string; nb: Notebook } | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showKernelSwitch, setShowKernelSwitch] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [recentNotebooks, setRecentNotebooks] = useState<{ file_path: string; last_opened: string }[]>([]);
 
   // sync stage → URL (include kernel in query param)
   function setStage(s: Stage, notebookPath?: string, kernelName?: string) {
@@ -84,6 +100,7 @@ function App() {
     if (s === 'home') window.history.pushState(null, '', '/');
     else if (s === 'browse') window.history.pushState(null, '', '/browse');
     else if (s === 'settings') window.history.pushState(null, '', '/settings');
+    else if (s === 'admin') window.history.pushState(null, '', '/admin');
     else if (s === 'ready' && notebookPath) {
       const k = kernelName ?? useKernelStore.getState().spec;
       const q = k ? `?kernel=${encodeURIComponent(k)}` : '';
@@ -252,23 +269,125 @@ function App() {
     init();
   }, []);
 
-  const leaveEditor = useCallback(() => {
+  // Tracks where to land after the dirty-save modal closes when leaving
+  // the notebook editor via the global top-nav. Defaults to 'home' if unset.
+  const pendingNavRef = useRef<Stage | null>(null);
+
+  const leaveEditor = useCallback((target: Stage = 'home') => {
+    // Save the current tab's snapshot BEFORE wiping notebook state, otherwise
+    // the next time the user opens a different notebook the saveCurrentTab
+    // in the kernel-picker flow runs against an empty store (filePath null)
+    // and no-ops, leaving this tab's snapshot unsaved. The follow-up tab
+    // switch would then find no snapshot and content wouldn't restore.
+    saveCurrentTab();
     cleanupCollab();
     ws.disconnect();
     useNotebookStore.setState({
       filePath: null, cells: [], activeCellId: null, dirty: false,
     });
-    setStage('home');
+    setStage(target);
   }, []);
 
-  const goHome = useCallback(() => {
-    const { dirty } = useNotebookStore.getState();
-    if (dirty) {
-      setShowSaveModal(true);
-    } else {
-      leaveEditor();
+  const handleNav = useCallback((target: NavStage) => {
+    // 'notebook' nav item is only enabled while the editor is already open;
+    // clicking it from another stage shouldn't happen (button is disabled),
+    // and clicking it from within the editor is a no-op.
+    if (target === 'notebook') return;
+    const targetStage: Stage =
+      target === 'home' ? 'home'
+        : target === 'browse' ? 'browse'
+          : target === 'settings' ? 'settings'
+            : 'admin';
+    // Inside the editor: prompt to save if dirty before leaving.
+    if (stage === 'ready') {
+      const dirty = useNotebookStore.getState().dirty;
+      if (dirty) {
+        pendingNavRef.current = targetStage;
+        setShowSaveModal(true);
+      } else {
+        leaveEditor(targetStage);
+      }
+      return;
     }
-  }, [leaveEditor]);
+    setStage(targetStage);
+  }, [stage, leaveEditor]);
+
+  // Recent notebooks for the command palette. Refreshed when the user is
+  // present and whenever they navigate back to home — small payload, fine to
+  // refetch lazily rather than syncing through a global store.
+  useEffect(() => {
+    if (!user) { setRecentNotebooks([]); return; }
+    api.getDashboard()
+      .then(d => setRecentNotebooks(d.recent_notebooks))
+      .catch(() => {});
+  }, [user, stage]);
+
+  // Global ⌘K / Ctrl+K toggle for the command palette.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        // Don't hijack ⌘K when the user is typing in an input/editor.
+        const el = e.target as HTMLElement;
+        if (el?.closest('.monaco-editor')) return;
+        e.preventDefault();
+        setPaletteOpen(p => !p);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const newNotebookFromPalette = useCallback(async () => {
+    try {
+      const res = await api.createNotebook();
+      const nb = await api.getNotebook(res.path);
+      setPending({ path: res.path, nb });
+      setStage('kernel');
+    } catch (e: unknown) {
+      console.error('Create notebook failed', e);
+    }
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await api.logout().catch(() => {});
+    setUser(null);
+    setIsFirstUser(false);
+    setStageRaw('login');
+    window.history.pushState(null, '', '/');
+  }, []);
+
+  // Notebook command-palette actions — only meaningful when stage === 'ready'.
+  // Imports kept dynamic to avoid pulling editor-only modules into login/loading
+  // bundles (small win, but the lazy import boundary is already there).
+  const notebookActions = useMemo(() => {
+    if (stage !== 'ready') return undefined;
+    return {
+      runAllCells: () => {
+        const codeIds = useNotebookStore.getState().cells
+          .filter(c => c.cell_type === 'code')
+          .map(c => c.id);
+        queueCells(codeIds);
+      },
+      clearAllOutputs: () => {
+        const nb = useNotebookStore.getState();
+        for (const cell of nb.cells) {
+          if (cell.cell_type === 'code') nb.clearOutputs(cell.id);
+        }
+      },
+      restartKernel: () => {
+        const spec = useKernelStore.getState().spec ?? 'python3';
+        useKernelStore.getState().setStatus('restarting');
+        ws.reconnect(spec, useNotebookStore.getState().filePath ?? undefined);
+      },
+      interrupt: () => {
+        ws.send('interrupt');
+        clearQueue();
+      },
+      saveNotebook: () => { void saveNotebook(); },
+      exportPdf: () => setShowExport(true),
+      switchKernel: () => setShowKernelSwitch(true),
+    };
+  }, [stage]);
 
   if (stage === 'loading') {
     return <div className="min-h-screen bg-bg flex items-center justify-center text-text-muted text-sm">Loading...</div>;
@@ -286,61 +405,7 @@ function App() {
     );
   }
 
-  if (stage === 'settings') {
-    return <>
-      <SettingsPage onBack={() => setStage('home')} user={user ?? undefined} />
-      <UpdateNotice />
-    </>;
-  }
-
-  if (stage === 'home') {
-    return (
-      <>
-        <HomeDashboard
-          onOpenNotebook={(path, nb) => {
-            setPending({ path, nb });
-            setStage('kernel');
-          }}
-          onBrowseFiles={() => setStage('browse')}
-          onSettings={() => setStage('settings')}
-          onAdmin={user?.is_admin ? () => setStage('admin') : undefined}
-          onLogout={async () => {
-            await api.logout().catch(() => {});
-            setUser(null);
-            setIsFirstUser(false);
-            setStageRaw('login');
-            window.history.pushState(null, '', '/');
-          }}
-        />
-        <UpdateNotice />
-      </>
-    );
-  }
-
-  if (stage === 'admin') {
-    return (
-      <>
-        <AdminPanel onBack={() => setStage('home')} />
-        <UpdateNotice />
-      </>
-    );
-  }
-
-  if (stage === 'browse') {
-    return (
-      <>
-        <Dashboard onOpenNotebook={(path, nb) => {
-          setPending({ path, nb });
-          setStage('kernel');
-        }}
-          onSettings={() => setStage('settings')}
-          onBack={() => setStage('home')}
-        />
-        <UpdateNotice />
-      </>
-    );
-  }
-
+  // Kernel picker is full-bleed (modal-style) — bypasses AppShell.
   if (stage === 'kernel') {
     return (
       <KernelPicker
@@ -352,7 +417,6 @@ function App() {
             useNotebookStore.getState().loadNotebook(pending.path, pending.nb);
             const name = pending.path.split('/').pop() ?? 'Untitled';
             useTabStore.getState().addTab(pending.path, name, kernelName);
-            // always start collab so multiple users can edit together
             initCollaboration(pending.path, user?.username ?? 'anonymous');
             setPending(null);
           }
@@ -377,14 +441,45 @@ function App() {
     );
   }
 
+  // Whether the editor is currently active. Drives the Notebook nav item's
+  // enabled state — only true while we're inside stage === 'ready'.
+  const hasOpenNotebook = stage === 'ready' && useNotebookStore.getState().filePath !== null;
+
   return (
-    <>
-      <AppLayout
-        onGoHome={goHome}
-        onExport={() => setShowExport(true)}
-        onSwitchKernel={() => setShowKernelSwitch(true)}
-        username={user?.username ?? 'anonymous'}
-      />
+    <AppShell
+      user={user}
+      currentStage={navStageFor(stage)}
+      hasOpenNotebook={hasOpenNotebook}
+      onNav={handleNav}
+      onLogout={handleLogout}
+      onOpenSearch={() => setPaletteOpen(true)}
+    >
+      {stage === 'home' && (
+        <HomeDashboard
+          onOpenNotebook={(path, nb) => {
+            setPending({ path, nb });
+            setStage('kernel');
+          }}
+          onBrowseFiles={() => setStage('browse')}
+        />
+      )}
+      {stage === 'browse' && (
+        <Dashboard onOpenNotebook={(path, nb) => {
+          setPending({ path, nb });
+          setStage('kernel');
+        }} />
+      )}
+      {stage === 'settings' && <SettingsPage user={user ?? undefined} />}
+      {stage === 'admin' && <AdminPanel callerIsSuperAdmin={!!user?.is_super_admin} />}
+      {stage === 'ready' && (
+        <AppLayout
+          onExport={() => setShowExport(true)}
+          onSwitchKernel={() => setShowKernelSwitch(true)}
+          username={user?.username ?? 'anonymous'}
+        />
+      )}
+
+      <UpdateNotice />
       {showExport && <ExportModal onClose={() => setShowExport(false)} />}
       {showKernelSwitch && (
         <KernelPicker
@@ -392,7 +487,6 @@ function App() {
             ws.reconnect(kernelName, useNotebookStore.getState().filePath ?? undefined);
             useKernelStore.getState().setSpec(kernelName);
             setShowKernelSwitch(false);
-            // update URL with new kernel
             const path = useNotebookStore.getState().filePath;
             if (path) {
               const q = `?kernel=${encodeURIComponent(kernelName)}`;
@@ -407,16 +501,43 @@ function App() {
           onSave={async () => {
             await saveNotebook();
             setShowSaveModal(false);
-            leaveEditor();
+            leaveEditor(pendingNavRef.current ?? 'home');
+            pendingNavRef.current = null;
           }}
           onDiscard={() => {
             setShowSaveModal(false);
-            leaveEditor();
+            leaveEditor(pendingNavRef.current ?? 'home');
+            pendingNavRef.current = null;
           }}
-          onCancel={() => setShowSaveModal(false)}
+          onCancel={() => {
+            setShowSaveModal(false);
+            pendingNavRef.current = null;
+          }}
         />
       )}
-    </>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        user={user}
+        currentStage={
+          stage === 'ready' ? 'notebook'
+            : stage === 'browse' ? 'browse'
+              : stage === 'settings' ? 'settings'
+                : stage === 'admin' ? 'admin'
+                  : 'home'
+        }
+        recent={recentNotebooks}
+        onNav={handleNav}
+        onLogout={handleLogout}
+        onOpenNotebook={(path, nb) => {
+          setPending({ path, nb });
+          setStage('kernel');
+        }}
+        onNewNotebook={newNotebookFromPalette}
+        notebookActions={notebookActions}
+      />
+    </AppShell>
   );
 }
 

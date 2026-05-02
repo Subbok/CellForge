@@ -18,6 +18,10 @@ pub struct DashboardResponse {
     recent_notebooks: Vec<cellforge_auth::db::RecentNotebook>,
     shared_files: Vec<cellforge_auth::db::SharedFile>,
     running_kernels: Vec<KernelSession>,
+    /// Up to 6 usernames of other users active in the last 2 minutes —
+    /// enough for the Home avatar stack without ballooning the payload on
+    /// large workspaces. The full count lives in `stats.online_count`.
+    online_others: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -25,6 +29,10 @@ pub struct DashboardStats {
     recent_notebooks_count: usize,
     shared_files_count: usize,
     running_kernels_count: usize,
+    /// Total number of users (including the caller) seen by the auth
+    /// middleware in the last 2 minutes. Drives the "X collaborators
+    /// online" sub-line on Home.
+    online_count: i64,
 }
 
 /// GET /api/dashboard — full dashboard data for the logged-in user.
@@ -62,10 +70,18 @@ pub async fn dashboard(
         .filter(|s| s.username == username)
         .collect();
 
+    // 2-minute presence window — long enough that a 5-second poll keeps
+    // the user counted, short enough that closing the tab drops them off
+    // within a couple of polls.
+    const ONLINE_WINDOW_SECS: i64 = 120;
+    let online_count = state.users.count_online(ONLINE_WINDOW_SECS);
+    let online_others = state.users.online_others(&username, ONLINE_WINDOW_SECS, 6);
+
     let stats = DashboardStats {
         recent_notebooks_count: recent_notebooks.len(),
         shared_files_count: shared_files.len(),
         running_kernels_count: running_kernels.len(),
+        online_count,
     };
 
     Ok(Json(DashboardResponse {
@@ -76,6 +92,7 @@ pub async fn dashboard(
         recent_notebooks,
         shared_files,
         running_kernels,
+        online_others,
     }))
 }
 
@@ -93,6 +110,19 @@ pub async fn dashboard_kernels(
         .collect();
 
     Ok(Json(user_kernels))
+}
+
+/// GET /api/activity — recent events visible to the calling user.
+/// Visibility rule: events the user performed themselves + shares whose
+/// recipient is the user. Limit hard-capped server-side so a malicious
+/// client can't request a million rows.
+pub async fn activity(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, StatusCode> {
+    let username = extract_user(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let events = state.users.list_activity(&username, 50);
+    Ok(Json(events))
 }
 
 /// POST /api/kernels/:id/stop — stop a specific kernel.

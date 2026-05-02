@@ -49,6 +49,9 @@ export interface AuthUser {
   username: string;
   display_name?: string;
   is_admin: boolean;
+  /** True only for the bootstrap admin (id == 1). They can demote/delete
+   *  other admins; nothing in the app can demote or delete them. */
+  is_super_admin?: boolean;
   role?: string;
 }
 
@@ -57,6 +60,12 @@ export interface FileEntry {
   path: string;
   is_dir: boolean;
   size: number | null;
+  /** ISO 8601 UTC mtime, or null if the filesystem doesn't expose it. */
+  modified: string | null;
+  /** Cell count for `.ipynb` files; null for folders / plain files / corrupt notebooks. */
+  cell_count: number | null;
+  /** Kernel display_name (or name) from notebook metadata; null for non-notebooks. */
+  kernelspec: string | null;
 }
 
 export const api = {
@@ -229,28 +238,33 @@ export const api = {
     username: string;
     display_name: string;
     is_admin: boolean;
-    stats: { recent_notebooks_count: number; running_kernels_count: number; shared_files_count: number };
+    stats: { recent_notebooks_count: number; running_kernels_count: number; shared_files_count: number; online_count: number };
     recent_notebooks: { file_path: string; last_opened: string }[];
-    shared_files: { id: number; from_user: string; file_name: string }[];
+    shared_files: { id: number; from_user: string; file_name: string; shared_at: string }[];
     running_kernels: { id: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number; started_at: string }[];
+    online_others: string[];
   }>('/dashboard'),
   getDashboardKernels: () => get<{
-    id: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number;
+    id: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number; cpu_pct: number;
   }[]>('/dashboard/kernels'),
+  getActivity: () => get<{ id: number; ts: string; actor: string; kind: string; target: string; meta: string }[]>('/activity'),
   stopKernel: (id: string) => post<void>(`/kernels/${id}/stop`),
 
   // Admin
   getAdminStats: () => get<{ user_count: number; total_kernels: number; total_memory_mb: number }>('/admin/stats'),
-  getAdminUsers: () => get<{ username: string; display_name: string; is_admin: boolean; created_at: string; kernel_count: number }[]>('/admin/users'),
-  updateAdminUser: (username: string, data: { max_kernels?: number; max_memory_mb?: number; group_name?: string; is_active?: boolean }) =>
+  getAdminUsers: () => get<{ username: string; display_name: string; is_admin: boolean; is_super_admin: boolean; created_at: string; created_by: string; last_seen_at: string | null; kernel_count: number; notebook_count: number; storage_bytes: number }[]>('/admin/users'),
+  getQuota: () => get<{ used_bytes: number; notebook_count: number; max_storage_mb: number }>('/quota'),
+  updateAdminUser: (username: string, data: { max_kernels?: number; max_memory_mb?: number; max_storage_mb?: number; group_name?: string; is_active?: boolean; is_admin?: boolean }) =>
     put(`/admin/users/${username}`, data),
+  adminCreateUser: (data: { username: string; password: string; display_name?: string; role?: 'admin' | 'user' }) =>
+    post<{ user: { username: string; display_name: string; is_admin: boolean; created_at: string; created_by: string } }>('/admin/users', data),
   getAdminGroups: () => get<{ name: string; description: string; max_kernels_per_user: number; max_memory_mb_per_user: number }[]>('/admin/groups'),
   createAdminGroup: (data: { name: string; description?: string; max_kernels_per_user?: number; max_memory_mb_per_user?: number }) =>
     post<void>('/admin/groups', data),
   updateAdminGroup: (name: string, data: { description?: string; max_kernels_per_user?: number; max_memory_mb_per_user?: number }) =>
     put(`/admin/groups/${name}`, data),
   deleteAdminGroup: (name: string) => del(`/admin/groups/${name}`),
-  getAdminKernels: () => get<{ id: string; username: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number }[]>('/admin/kernels'),
+  getAdminKernels: () => get<{ id: string; username: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number; cpu_pct: number }[]>('/admin/kernels'),
   adminStopKernel: (id: string) => post<void>(`/admin/kernels/${id}/stop`),
   adminStopAllIdle: () => post<{ stopped: number }>('/admin/kernels/stop-idle'),
 };

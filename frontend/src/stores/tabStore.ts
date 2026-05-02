@@ -17,6 +17,8 @@ interface TabState {
   addTab(path: string, name: string, kernelName?: string): string; // returns tab id
   closeTab(id: string): void;
   setActiveTab(id: string): void;
+  /** Drag-and-drop reorder: insert `dragId` immediately before `overId`. */
+  reorderTabs(dragId: string, overId: string): void;
 }
 
 export const useTabStore = create<TabState>((set, get) => ({
@@ -55,4 +57,18 @@ export const useTabStore = create<TabState>((set, get) => ({
   }),
 
   setActiveTab: (id) => set({ activeTabId: id }),
+
+  reorderTabs: (dragId, overId) => set(s => {
+    if (dragId === overId) return s;
+    const tabs = [...s.tabs];
+    const fromIdx = tabs.findIndex(t => t.id === dragId);
+    const toIdx = tabs.findIndex(t => t.id === overId);
+    if (fromIdx === -1 || toIdx === -1) return s;
+    const [moved] = tabs.splice(fromIdx, 1);
+    // Splice index shifts when fromIdx < toIdx — recompute against the
+    // current array so the dragged tab lands *before* the over-target.
+    const insertAt = tabs.findIndex(t => t.id === overId);
+    tabs.splice(insertAt, 0, moved);
+    return { tabs };
+  }),
 }));

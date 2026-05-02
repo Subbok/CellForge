@@ -4,17 +4,305 @@ import { setLanguage } from '../lib/i18n';
 import { api } from '../services/api';
 import { useUIStore } from '../stores/uiStore';
 import { refreshPlugins } from '../plugins/loader';
-import { ArrowLeft, Trash2, Upload, Check, Puzzle, Shield, RotateCcw, Key } from 'lucide-react';
+import { Trash2, Upload, Check, Puzzle, Shield, RotateCcw, Key } from 'lucide-react';
 import { useModal } from './ModalDialog';
 import type { PluginEntry, PluginScope } from '../plugins/types';
+import { BrandMark } from './brand/BrandMark';
+import { APP_VERSION } from '../lib/version';
 
 interface Props {
-  onBack: () => void;
   user?: { username: string; is_admin: boolean };
 }
 
-export function Settings({ onBack, user }: Props) {
+type SectionId =
+  | 'profile' | 'appearance' | 'editor' | 'ai'
+  | 'plugins' | 'templates' | 'users' | 'about';
+
+/** Pane shell: H1 + subtitle, used by every section's right-hand content. */
+function PaneHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <h1 className="font-semibold" style={{
+        fontSize: 28, color: 'var(--color-text)', letterSpacing: '-0.025em',
+      }}>{title}</h1>
+      <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginTop: 4 }}>
+        {subtitle}
+      </p>
+    </div>
+  );
+}
+
+/** Settings row — label + sub on the left, control on the right. JSX baseline. */
+function Row({ label, sub, children }: {
+  label: string; sub?: string; children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center"
+      style={{ padding: '16px 0', borderTop: '1px solid var(--color-border-subtle)', gap: 16 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, color: 'var(--color-text)' }}>{label}</div>
+        {sub && (
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 2 }}>
+            {sub}
+          </div>
+        )}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+export function Settings({ user }: Props) {
+  const { t } = useTranslation();
+  const [active, setActive] = useState<SectionId>('profile');
+
+  const sections: { id: SectionId; label: string; visible: boolean }[] = [
+    { id: 'profile',    label: t('settings.secProfile'),    visible: true },
+    { id: 'appearance', label: t('settings.secAppearance'), visible: true },
+    { id: 'editor',     label: t('settings.secEditor'),     visible: true },
+    { id: 'ai',         label: t('settings.secAi'),         visible: true },
+    { id: 'plugins',    label: t('settings.secPlugins'),    visible: true },
+    { id: 'templates',  label: t('settings.secTemplates'),  visible: true },
+    { id: 'about',      label: t('settings.secAbout'),      visible: true },
+  ];
+
+  return (
+    <div className="h-full flex overflow-hidden" style={{
+      background: 'var(--color-bg)',
+      zoom: 1.15,
+    }}>
+      {/* Left sidebar — section nav */}
+      <aside style={{
+        width: 240, flexShrink: 0,
+        background: 'var(--color-bg-secondary)',
+        borderRight: '1px solid var(--color-border)',
+        padding: 16,
+        overflowY: 'auto',
+      }}>
+        <div className="uppercase" style={{
+          fontSize: 11, color: 'var(--color-text-muted)',
+          letterSpacing: '0.06em', marginBottom: 12, paddingLeft: 12,
+        }}>
+          {t('settings.title')}
+        </div>
+        {sections.filter(s => s.visible).map(s => {
+          const isActive = active === s.id;
+          return (
+            <button
+              key={s.id}
+              onClick={() => setActive(s.id)}
+              className="w-full text-left transition-colors"
+              style={{
+                padding: '8px 12px',
+                borderRadius: 6,
+                fontSize: 13,
+                color: isActive ? 'var(--color-text)' : 'var(--color-text-secondary)',
+                background: isActive ? 'var(--color-bg-hover)' : 'transparent',
+                marginBottom: 2,
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {s.label}
+            </button>
+          );
+        })}
+      </aside>
+
+      {/* Right pane — selected section */}
+      <main className="flex-1 overflow-auto" style={{ padding: '32px 40px' }}>
+        <div style={{ maxWidth: 760 }}>
+          {active === 'profile'    && <ProfilePane user={user} />}
+          {active === 'appearance' && <AppearancePane isAdmin={!!user?.is_admin} />}
+          {active === 'editor'     && <EditorPane />}
+          {active === 'ai'         && <AiPane />}
+          {active === 'plugins'    && <PluginsPane isAdmin={!!user?.is_admin} />}
+          {active === 'templates'  && <TemplatesPane />}
+          {active === 'about'      && <AboutPane />}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ── Section panes ────────────────────────────────────────────────────────────
+
+function ProfilePane({ user }: { user?: { username: string; is_admin: boolean } }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <PaneHeader title={t('settings.secProfile')} subtitle={t('settings.subProfile')} />
+      <Row label={t('auth.username')}>
+        <span className="font-mono text-text" style={{ fontSize: 13 }}>{user?.username ?? '—'}</span>
+      </Row>
+      <Row label={t('admin.role')}>
+        <span style={{
+          padding: '2px 8px', borderRadius: 4, fontSize: 11,
+          background: user?.is_admin
+            ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)'
+            : 'var(--color-bg-hover)',
+          color: user?.is_admin ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+        }}>
+          {user?.is_admin ? 'admin' : 'user'}
+        </span>
+      </Row>
+      <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 24, marginTop: 8 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text)', marginBottom: 4 }}>
+          {t('auth.password')}
+        </h2>
+        <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
+          {t('settings.changePasswordDesc')}
+        </p>
+        <ChangePassword />
+      </div>
+    </>
+  );
+}
+
+function AppearancePane({ isAdmin }: { isAdmin: boolean }) {
   const { t, i18n } = useTranslation();
+  const accentColor = useUIStore(s => s.accentColor);
+  const setAccentColor = useUIStore(s => s.setAccentColor);
+  const sidebarSide = useUIStore(s => s.sidebarSide);
+  const setSidebarSide = useUIStore(s => s.setSidebarSide);
+
+  return (
+    <>
+      <PaneHeader title={t('settings.secAppearance')} subtitle={t('settings.subAppearance')} />
+      <div style={{ marginBottom: 28 }}>
+        <h2 style={{ fontSize: 14, color: 'var(--color-text)', marginBottom: 4 }}>
+          {t('settings.accentColor')}
+        </h2>
+        <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 12 }}>
+          {t('settings.accentDescription')}
+        </p>
+        <AccentPicker value={accentColor} onChange={setAccentColor} />
+      </div>
+
+      <Row label={t('settings.language')} sub={t('settings.languageDescription')}>
+        <div className="flex" style={{ gap: 6 }}>
+          {[
+            { code: 'en', label: 'EN' },
+            { code: 'pl', label: 'PL' },
+          ].map(lang => (
+            <button
+              key={lang.code}
+              onClick={() => setLanguage(lang.code)}
+              style={{
+                padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                background: i18n.language === lang.code
+                  ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)'
+                  : 'var(--color-bg-elevated)',
+                color: i18n.language === lang.code ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                border: i18n.language === lang.code
+                  ? '1px solid var(--color-accent)'
+                  : '1px solid var(--color-border)',
+                cursor: 'pointer',
+              }}
+            >
+              {lang.label}
+            </button>
+          ))}
+        </div>
+      </Row>
+
+      <Row label={t('settings.sidebarSide')} sub={t('settings.sidebarSideDesc')}>
+        <div className="flex" style={{ gap: 6 }}>
+          {([
+            { v: 'left' as const,  label: t('settings.sidebarLeft') },
+            { v: 'right' as const, label: t('settings.sidebarRight') },
+          ]).map(opt => (
+            <button
+              key={opt.v}
+              onClick={() => setSidebarSide(opt.v)}
+              style={{
+                padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                background: sidebarSide === opt.v
+                  ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)'
+                  : 'var(--color-bg-elevated)',
+                color: sidebarSide === opt.v ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                border: sidebarSide === opt.v
+                  ? '1px solid var(--color-accent)'
+                  : '1px solid var(--color-border)',
+                cursor: 'pointer',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </Row>
+
+      <div style={{ borderTop: '1px solid var(--color-border-subtle)', paddingTop: 24, marginTop: 8 }}>
+        <ThemesSection isAdminProp={isAdmin} />
+      </div>
+    </>
+  );
+}
+
+function EditorPane() {
+  const { t } = useTranslation();
+  const autoSave = useUIStore(s => s.autoSaveInterval);
+  const setAutoSave = useUIStore(s => s.setAutoSaveInterval);
+  const reactive = useUIStore(s => s.reactiveEnabled);
+  const setReactive = useUIStore(s => s.setReactiveEnabled);
+
+  return (
+    <>
+      <PaneHeader title={t('settings.secEditor')} subtitle={t('settings.subEditor')} />
+      <Row
+        label={t('settings.reactiveExecution')}
+        sub={reactive ? t('settings.reactiveEnabledDesc') : t('settings.reactiveDisabledDesc')}
+      >
+        <Toggle on={reactive} onChange={setReactive} />
+      </Row>
+      <Row label={t('settings.autoSave')}>
+        <select
+          value={autoSave}
+          onChange={e => setAutoSave(Number(e.target.value))}
+          style={{
+            padding: '6px 10px',
+            background: 'var(--color-bg-elevated)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 6,
+            fontSize: 12, color: 'var(--color-text)',
+            outline: 'none',
+          }}
+        >
+          <option value={0}>{t('settings.autoSaveDisabled')}</option>
+          <option value={10}>{t('settings.autoSave10s')}</option>
+          <option value={30}>{t('settings.autoSave30s')}</option>
+          <option value={60}>{t('settings.autoSave1m')}</option>
+          <option value={120}>{t('settings.autoSave2m')}</option>
+          <option value={300}>{t('settings.autoSave5m')}</option>
+        </select>
+      </Row>
+    </>
+  );
+}
+
+function AiPane() {
+  const { t } = useTranslation();
+  return (
+    <>
+      <PaneHeader title={t('settings.secAi')} subtitle={t('settings.subAi')} />
+      <AiSettings />
+    </>
+  );
+}
+
+function PluginsPane({ isAdmin }: { isAdmin: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <PaneHeader title={t('settings.secPlugins')} subtitle={t('settings.subPlugins')} />
+      <PluginsSection isAdminProp={isAdmin} />
+    </>
+  );
+}
+
+function TemplatesPane() {
+  const { t } = useTranslation();
   const [templates, setTemplates] = useState<{ name: string; variables: { key: string; default_value: string }[]; assets?: string[] }[]>([]);
   const [showUpload, setShowUpload] = useState(false);
   const [uploadName, setUploadName] = useState('');
@@ -22,13 +310,6 @@ export function Settings({ onBack, user }: Props) {
   const [uploadAssets, setUploadAssets] = useState<File[]>([]);
   const typInputRef = useRef<HTMLInputElement>(null);
   const assetInputRef = useRef<HTMLInputElement>(null);
-
-  const autoSave = useUIStore(s => s.autoSaveInterval);
-  const setAutoSave = useUIStore(s => s.setAutoSaveInterval);
-  const reactive = useUIStore(s => s.reactiveEnabled);
-  const setReactive = useUIStore(s => s.setReactiveEnabled);
-  const accentColor = useUIStore(s => s.accentColor);
-  const setAccentColor = useUIStore(s => s.setAccentColor);
 
   function loadTemplates() {
     api.listTemplates().then(setTemplates).catch(() => {});
@@ -39,9 +320,7 @@ export function Settings({ onBack, user }: Props) {
     if (!uploadName.trim() || !uploadTyp) return;
     const content = await uploadTyp.text();
     await api.uploadTemplate(uploadName.trim(), content, uploadAssets);
-    setUploadName('');
-    setUploadTyp(null);
-    setUploadAssets([]);
+    setUploadName(''); setUploadTyp(null); setUploadAssets([]);
     setShowUpload(false);
     loadTemplates();
   }
@@ -53,257 +332,147 @@ export function Settings({ onBack, user }: Props) {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-bg relative">
-      {/* Ambient glow */}
-      <div className="absolute inset-0 pointer-events-none"
-        style={{ background: 'radial-gradient(ellipse 600px 300px at 50% 0%, rgba(122,153,255,0.04), transparent)' }} />
-
-      <header className="sticky top-0 z-20 border-b border-border/60 bg-bg/80 backdrop-blur-xl">
-        <div className="max-w-3xl mx-auto px-6 h-14 flex items-center gap-3">
-          <button onClick={onBack} className="btn btn-sm btn-ghost gap-1.5">
-            <ArrowLeft size={14} /> {t('common.back')}
-          </button>
-          <div className="w-px h-5 bg-border/50" />
-          <h1 className="font-semibold text-text text-sm">{t('settings.title')}</h1>
-        </div>
-      </header>
-
-      <div className="relative max-w-3xl mx-auto px-6 py-8 space-y-6">
-        {/* ── Appearance ── */}
-        <div className="flex items-center gap-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.appearance')}</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.perUser')}</span>
-        </div>
-
-        <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">{t('settings.accentColor')}</h2>
-          <p className="section-desc">
-            {t('settings.accentDescription')}
-          </p>
-          <AccentPicker value={accentColor} onChange={setAccentColor} />
-        </section>
-
-        {/* Language */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-text">{t('settings.language')}</h3>
-          <p className="text-xs text-text-muted">{t('settings.languageDescription')}</p>
-          <div className="flex gap-2">
-            {[
-              { code: 'en', label: 'English' },
-              { code: 'pl', label: 'Polski' },
-            ].map(lang => (
-              <button
-                key={lang.code}
-                onClick={() => setLanguage(lang.code)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  i18n.language === lang.code
-                    ? 'bg-accent/15 border-accent/40 text-accent'
-                    : 'bg-bg-elevated border-border text-text-secondary hover:border-border/80'
-                }`}
-              >
-                {lang.label}
+    <>
+      <PaneHeader title={t('settings.secTemplates')} subtitle={t('settings.subTemplates')} />
+      <div className="space-y-1">
+        {templates.map(tpl => (
+          <div key={tpl.name}
+            className="flex items-center gap-3"
+            style={{
+              padding: '12px 16px', borderRadius: 8,
+              border: '1px solid var(--color-border)',
+            }}>
+            <div className="flex-1 min-w-0">
+              <span className="text-text" style={{ fontSize: 13 }}>{tpl.name}</span>
+              {tpl.variables.length > 0 && (
+                <span className="text-text-muted ml-2" style={{ fontSize: 11 }}>
+                  ({tpl.variables.map(v => v.key).join(', ')})
+                </span>
+              )}
+              {tpl.assets && tpl.assets.length > 0 && (
+                <span className="text-text-muted ml-2" style={{ fontSize: 11 }}>
+                  · {tpl.assets.length} asset{tpl.assets.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            <label className="btn btn-sm btn-ghost cursor-pointer" title={t('settings.addAssets')}>
+              <Upload size={12} />
+              <input type="file" multiple className="hidden" onChange={async e => {
+                const files = Array.from(e.target.files ?? []);
+                if (!files.length) return;
+                try { await api.uploadTemplateAssets(tpl.name, files); loadTemplates(); }
+                catch { /* ignored */ }
+                e.target.value = '';
+              }} />
+            </label>
+            {tpl.name !== 'default' && (
+              <button onClick={() => deleteTemplate(tpl.name)}
+                className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error">
+                <Trash2 size={14} />
               </button>
-            ))}
+            )}
           </div>
-        </div>
-
-        <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <ThemesSection isAdminProp={Boolean(user?.is_admin)} />
-        </div>
-
-        {/* ── Editor ── */}
-        <div className="flex items-center gap-2 pt-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.editor')}</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.perUser')}</span>
-        </div>
-
-        <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">{t('settings.reactiveExecution')}</h2>
-          <p className="section-desc">
-            {t('settings.reactiveDescription')}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setReactive(!reactive)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-                reactive
-                  ? 'bg-accent/10 border-accent text-accent'
-                  : 'bg-bg-elevated border-border text-text-muted hover:border-text-muted/30'
-              }`}
-            >
-              {reactive ? t('settings.reactiveEnabled') : t('settings.reactiveDisabled')}
-            </button>
-            <span className="text-xs text-text-muted italic">
-              {reactive ? t('settings.reactiveEnabledDesc') : t('settings.reactiveDisabledDesc')}
-            </span>
-          </div>
-        </section>
-
-        <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">{t('settings.autoSave')}</h2>
-          <div className="flex items-center gap-3">
-            <select
-              value={autoSave}
-              onChange={e => setAutoSave(Number(e.target.value))}
-              className="field w-auto"
-            >
-              <option value={0}>{t('settings.autoSaveDisabled')}</option>
-              <option value={10}>{t('settings.autoSave10s')}</option>
-              <option value={30}>{t('settings.autoSave30s')}</option>
-              <option value={60}>{t('settings.autoSave1m')}</option>
-              <option value={120}>{t('settings.autoSave2m')}</option>
-              <option value={300}>{t('settings.autoSave5m')}</option>
-            </select>
-          </div>
-        </section>
-
-        <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">{t('settings.aiAssistant')}</h2>
-          <p className="section-desc">
-            {t('settings.aiDescription')}
-          </p>
-          <AiSettings />
-        </section>
-
-        {/* ── Export ── */}
-        <div className="flex items-center gap-2 pt-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.exportSection')}</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.systemWide')}</span>
-        </div>
-
-        <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">{t('settings.pdfTemplates')}</h2>
-          <p className="section-desc">
-            {t('settings.templatesDescription')}
-          </p>
-
-          <div className="space-y-1">
-            {templates.map(tpl => (
-              <div key={tpl.name}
-                className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border">
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm text-text">{tpl.name}</span>
-                  {tpl.variables.length > 0 && (
-                    <span className="text-xs text-text-muted ml-2">
-                      ({tpl.variables.map(v => v.key).join(', ')})
-                    </span>
-                  )}
-                  {tpl.assets && tpl.assets.length > 0 && (
-                    <span className="text-xs text-text-muted ml-2">
-                      · {tpl.assets.length} asset{tpl.assets.length > 1 ? 's' : ''}
-                    </span>
-                  )}
-                </div>
-                <label className="btn btn-sm btn-ghost cursor-pointer" title={t('settings.addAssets')}>
-                  <Upload size={12} />
-                  <input type="file" multiple className="hidden" onChange={async e => {
-                    const files = Array.from(e.target.files ?? []);
-                    if (!files.length) return;
-                    try {
-                      await api.uploadTemplateAssets(tpl.name, files);
-                      loadTemplates();
-                    } catch { /* ignored */ }
-                    e.target.value = '';
-                  }} />
-                </label>
-                {tpl.name !== 'default' && (
-                  <button onClick={() => deleteTemplate(tpl.name)}
-                    className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error">
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {!showUpload ? (
-            <button onClick={() => setShowUpload(true)} className="btn btn-md btn-secondary mt-3">
-              <Upload size={14} /> {t('settings.uploadTemplate')}
-            </button>
-          ) : (
-            <div className="mt-3 p-4 border border-border rounded-lg space-y-3">
-              <input
-                value={uploadName}
-                onChange={e => setUploadName(e.target.value)}
-                placeholder={t('settings.templateName')}
-                className="field"
-              />
-
-              <div>
-                <label className="text-xs text-text-muted block mb-1">{t('settings.templateFile')}</label>
-                <input ref={typInputRef} type="file" accept=".typ"
-                  onChange={e => setUploadTyp(e.target.files?.[0] ?? null)}
-                  className="text-xs text-text-secondary" />
-              </div>
-
-              <div>
-                <label className="text-xs text-text-muted block mb-1">{t('settings.assetsOptional')}</label>
-                <input ref={assetInputRef} type="file" multiple
-                  onChange={e => setUploadAssets(Array.from(e.target.files ?? []))}
-                  className="text-xs text-text-secondary" />
-                {uploadAssets.length > 0 && (
-                  <div className="text-xs text-text-muted mt-1">
-                    {uploadAssets.map(f => f.name).join(', ')}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={doUpload}
-                  disabled={!uploadName.trim() || !uploadTyp}
-                  className="btn btn-md btn-primary"
-                >
-                  {t('common.upload')}
-                </button>
-                <button onClick={() => setShowUpload(false)} className="btn btn-md btn-ghost">
-                  {t('common.cancel')}
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* ── Account & Users ── */}
-        <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider pt-2">{t('settings.account')}</h3>
-
-        <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">{t('auth.password')}</h2>
-          <p className="section-desc">{t('settings.changePasswordDesc')}</p>
-          <ChangePassword />
-        </section>
-
-        {user?.is_admin && (
-          <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-            <UserManagement />
-          </div>
-        )}
-
-        {/* ── Extensions ── */}
-        <div className="flex items-center gap-2 pt-2">
-          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">{t('settings.extensions')}</h3>
-          <span className="text-[10px] text-text-muted bg-bg-elevated/80 border border-border/40 px-2 py-0.5 rounded">{t('settings.perScope')}</span>
-        </div>
-
-        <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <PluginsSection isAdminProp={Boolean(user?.is_admin)} />
-        </div>
-
-        {/* ── About ── */}
-        <section className="bg-bg-secondary/40 border border-border/40 rounded-2xl p-6">
-          <h2 className="section-title">{t('settings.about')}</h2>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
-              <Puzzle size={20} className="text-accent" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-text">CellForge</p>
-              <p className="text-[11px] text-text-muted">{t('settings.aboutDescription')}</p>
-            </div>
-          </div>
-        </section>
+        ))}
       </div>
-    </div>
+
+      {!showUpload ? (
+        <button onClick={() => setShowUpload(true)} className="btn btn-md btn-secondary mt-3">
+          <Upload size={14} /> {t('settings.uploadTemplate')}
+        </button>
+      ) : (
+        <div className="mt-3 space-y-3" style={{
+          padding: 16, borderRadius: 8,
+          border: '1px solid var(--color-border)',
+        }}>
+          <input
+            value={uploadName}
+            onChange={e => setUploadName(e.target.value)}
+            placeholder={t('settings.templateName')}
+            className="field"
+          />
+          <div>
+            <label className="text-xs text-text-muted block mb-1">{t('settings.templateFile')}</label>
+            <input ref={typInputRef} type="file" accept=".typ"
+              onChange={e => setUploadTyp(e.target.files?.[0] ?? null)}
+              className="text-xs text-text-secondary" />
+          </div>
+          <div>
+            <label className="text-xs text-text-muted block mb-1">{t('settings.assetsOptional')}</label>
+            <input ref={assetInputRef} type="file" multiple
+              onChange={e => setUploadAssets(Array.from(e.target.files ?? []))}
+              className="text-xs text-text-secondary" />
+            {uploadAssets.length > 0 && (
+              <div className="text-xs text-text-muted mt-1">
+                {uploadAssets.map(f => f.name).join(', ')}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowUpload(false)} className="btn btn-md btn-ghost">
+              {t('common.cancel')}
+            </button>
+            <button onClick={doUpload} disabled={!uploadName.trim() || !uploadTyp} className="btn btn-md btn-primary">
+              {t('common.upload')}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function AboutPane() {
+  const { t } = useTranslation();
+  return (
+    <>
+      <PaneHeader title={t('settings.secAbout')} subtitle={t('settings.subAbout')} />
+      <div className="flex items-center" style={{
+        padding: 18, borderRadius: 'var(--radius-lg, 10px)',
+        border: '1px solid var(--color-border)',
+        background: 'var(--color-bg-secondary)',
+        gap: 14,
+      }}>
+        <div className="text-text" style={{
+          width: 44, height: 44, borderRadius: 8,
+          background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <BrandMark size={26} />
+        </div>
+        <div>
+          <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>
+            CellForge <span className="font-mono text-text-muted" style={{ fontSize: 11, fontWeight: 500, marginLeft: 6 }}>v{APP_VERSION}</span>
+          </p>
+          <p style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+            {t('settings.aboutDescription')}
+          </p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Toggle (JSX 36×20 pill) ──
+
+function Toggle({ on, onChange }: { on: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!on)}
+      style={{
+        width: 36, height: 20, borderRadius: 10,
+        background: on ? 'var(--color-accent)' : 'var(--color-bg-hover)',
+        position: 'relative', cursor: 'pointer',
+        border: 'none',
+        transition: 'background 120ms ease',
+      }}
+    >
+      <span style={{
+        position: 'absolute', top: 2, left: on ? 18 : 2,
+        width: 16, height: 16, borderRadius: '50%',
+        background: on ? 'var(--color-accent-fg)' : 'var(--color-text-muted)',
+        transition: 'left 120ms ease, background 120ms ease',
+      }} />
+    </button>
   );
 }
 
@@ -377,7 +546,7 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (hex: stri
             onChange={e => setDraft(e.target.value)}
             onBlur={commitDraft}
             onKeyDown={e => { if (e.key === 'Enter') commitDraft(); }}
-            placeholder="#7a99ff"
+            placeholder="#a78bfa"
             maxLength={7}
             spellCheck={false}
             className="w-24 bg-transparent outline-none text-xs font-mono text-text"
@@ -533,11 +702,11 @@ function ThemePicker() {
       {availableThemes.map(th => {
         const active = th.id === currentThemeId;
         const preview = {
-          bg: th.vars['--color-bg'] ?? '#13141b',
-          elevated: th.vars['--color-bg-elevated'] ?? '#242736',
-          border: th.vars['--color-border'] ?? '#3f4154',
-          accent: th.vars['--color-accent'] ?? '#7a99ff',
-          text: th.vars['--color-text'] ?? '#ebedf2',
+          bg: th.vars['--color-bg'] ?? '#000000',
+          elevated: th.vars['--color-bg-elevated'] ?? '#242424',
+          border: th.vars['--color-border'] ?? 'rgba(255,255,255,0.10)',
+          accent: th.vars['--color-accent'] ?? '#a78bfa',
+          text: th.vars['--color-text'] ?? '#f4f5f7',
         };
         return (
           <button
@@ -917,92 +1086,3 @@ function ChangePassword() {
   );
 }
 
-function UserManagement() {
-  const { t } = useTranslation();
-  const modal = useModal();
-  const [users, setUsers] = useState<{ username: string; display_name?: string; is_admin?: boolean }[]>([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [newUser, setNewUser] = useState('');
-  const [newPass, setNewPass] = useState('');
-  const [newDisplay, setNewDisplay] = useState('');
-  const [error, setError] = useState('');
-
-  function load() { api.listUsers().then(setUsers).catch(() => {}); }
-  useEffect(() => { load(); }, []);
-
-  async function addUser() {
-    setError('');
-    try {
-      const res = await api.register(newUser, newPass, newDisplay || undefined);
-      if (!res.ok) { setError(res.error ?? 'failed'); return; }
-      setNewUser(''); setNewPass(''); setNewDisplay(''); setShowAdd(false);
-      load();
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
-  }
-
-  async function remove(username: string) {
-    await api.deleteUser(username);
-    load();
-  }
-
-  async function resetPassword(username: string) {
-    const newPass = await modal.prompt(t('settings.resetPassword'), `${t('settings.newPassword')} @${username}:`, t('settings.newPassword'));
-    if (!newPass) return;
-    try {
-      const res = await api.changePassword(newPass, username);
-      if (res.ok) await modal.alert(t('settings.passwordChanged'), t('settings.passwordUpdated', { username }), 'success');
-      else await modal.alert(t('common.error'), res.error ?? t('settings.failed'), 'error');
-    } catch (e: unknown) { await modal.alert(t('common.error'), e instanceof Error ? e.message : String(e), 'error'); }
-  }
-
-  return (
-    <section>
-      <h2 className="section-title">{t('settings.users')}</h2>
-      <p className="section-desc">{t('settings.usersDesc')}</p>
-
-      <div className="space-y-1 mb-3">
-        {users.map(u => (
-          <div key={u.username}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-border">
-            <div className="flex-1 min-w-0">
-              <span className="text-sm text-text">{u.display_name || u.username}</span>
-              <span className="text-xs text-text-muted ml-2">@{u.username}</span>
-              {u.is_admin && <span className="text-[10px] text-accent ml-2 font-medium">{t('settings.admin')}</span>}
-            </div>
-            <button onClick={() => resetPassword(u.username)}
-              className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-accent" title={t('settings.resetPassword')}>
-              <Key size={14} />
-            </button>
-            {!u.is_admin && (
-              <button onClick={() => remove(u.username)}
-                className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-error" title={t('settings.deleteUser')}>
-                <Trash2 size={14} />
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {!showAdd ? (
-        <button onClick={() => setShowAdd(true)} className="btn btn-md btn-secondary">
-          <Upload size={14} /> {t('settings.addUser')}
-        </button>
-      ) : (
-        <div className="p-4 border border-border rounded-lg space-y-2">
-          <input value={newUser} onChange={e => setNewUser(e.target.value)} placeholder={t('auth.username')} className="field" />
-          <input value={newDisplay} onChange={e => setNewDisplay(e.target.value)} placeholder={t('settings.displayNameOptional')} className="field" />
-          <input type="password" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder={t('auth.password')} className="field" />
-          {error && <div className="text-xs text-error">{error}</div>}
-          <div className="flex gap-2">
-            <button onClick={addUser} disabled={!newUser || !newPass} className="btn btn-md btn-primary">
-              {t('common.create')}
-            </button>
-            <button onClick={() => setShowAdd(false)} className="btn btn-md btn-ghost">
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}

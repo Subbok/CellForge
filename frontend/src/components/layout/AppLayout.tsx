@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { TopBar } from '../toolbar/TopBar';
-import { TabBar } from '../toolbar/TabBar';
+import { TabStrip } from '../toolbar/TabBar';
+import { useTabStore } from '../../stores/tabStore';
 import { Notebook } from '../notebook/Notebook';
 import { SearchBar } from '../notebook/SearchBar';
 import { ShortcutHelp } from '../ShortcutHelp';
@@ -12,8 +13,25 @@ import { api } from '../../services/api';
 import { undo, redo } from '../../services/undoRedo';
 import { broadcastSaved } from '../../services/collaboration';
 
-export function AppLayout({ onGoHome, onExport, onSwitchKernel, username }: {
-  onGoHome: () => void; onExport: () => void; onSwitchKernel: () => void;
+function TabStripRow({ username }: { username: string }) {
+  const tabs = useTabStore(s => s.tabs);
+  if (tabs.length <= 1) return null;
+  return (
+    <div
+      className="shrink-0"
+      style={{
+        height: 36,
+        background: 'var(--color-bg)',
+        borderBottom: '1px solid var(--color-border-subtle)',
+      }}
+    >
+      <TabStrip username={username} />
+    </div>
+  );
+}
+
+export function AppLayout({ onExport, onSwitchKernel, username }: {
+  onExport: () => void; onSwitchKernel: () => void;
   username: string;
 }) {
   const sidebarOpen = useUIStore(s => s.sidebarOpen);
@@ -102,25 +120,41 @@ export function AppLayout({ onGoHome, onExport, onSwitchKernel, username }: {
   }, []);
 
   const sidebarWidth = useUIStore(s => s.sidebarWidth);
+  const sidebarSide = useUIStore(s => s.sidebarSide);
+
+  // Sidebar width is the panel content; the 56px icon rail sits beside it,
+  // so the total column reserved is panel + rail. We also clamp it on small
+  // viewports so the notebook column always has at least ~360px to breathe —
+  // the user's persisted width might be wider than what the current window
+  // can sensibly accommodate (laptop docked into a 4K, then undocked, etc.).
+  const sidebarEl = sidebarOpen && (
+    <aside
+      className="shrink-0 flex min-h-0"
+      style={{
+        width: sidebarWidth + 56,
+        maxWidth: 'calc(100vw - 360px)',
+        background: 'var(--color-bg-secondary)',
+      }}
+    >
+      <Sidebar side={sidebarSide} />
+    </aside>
+  );
 
   return (
-    <div className="flex flex-col h-screen min-h-0">
-      <TopBar onGoHome={onGoHome} onExport={onExport} onSwitchKernel={onSwitchKernel} />
-      <TabBar username={username} />
+    <div className="flex flex-col h-full min-h-0">
+      {/* Thin tab strip — only shown when 2+ notebooks are open. Sits above
+          the notebook action header so it never has to fight kernel chip
+          and action chips for horizontal space on narrow viewports. */}
+      <TabStripRow username={username} />
+      <TopBar onExport={onExport} onSwitchKernel={onSwitchKernel} />
       {searchOpen && <SearchBar onClose={() => setSearchOpen(false)} />}
       {shortcutHelp && <ShortcutHelp onClose={() => setShortcutHelp(false)} />}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <main className="flex-1 min-w-0 overflow-y-auto bg-bg-secondary">
+        {sidebarSide === 'left' && sidebarEl}
+        <main className="flex-1 min-w-0 overflow-y-auto" style={{ background: 'var(--color-bg)' }}>
           <Notebook />
         </main>
-        {sidebarOpen && (
-          <aside
-            className="shrink-0 border-l border-border/40 bg-bg-secondary flex min-h-0"
-            style={{ width: sidebarWidth }}
-          >
-            <Sidebar />
-          </aside>
-        )}
+        {sidebarSide === 'right' && sidebarEl}
       </div>
       <ContextMenuHost />
     </div>

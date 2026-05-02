@@ -42,10 +42,19 @@ pub async fn read(
 ) -> Result<Json<Notebook>, StatusCode> {
     let dir = user_notebook_dir(&state, &headers);
     let full = safe_resolve(&dir, &path)?;
-    io::read_notebook(&full).map(Json).map_err(|e| {
+    let result = io::read_notebook(&full).map(Json).map_err(|e| {
         tracing::error!("reading {path}: {e}");
         StatusCode::NOT_FOUND
-    })
+    });
+    if result.is_ok() && path.ends_with(".ipynb")
+        && let Some(actor) = crate::routes::auth::extract_user(&headers)
+    {
+        // Activity feed: log the open so the Home column has something to
+        // show. Only `.ipynb` files — opening generic files isn't part of
+        // the notebook flow and would noise up the feed.
+        state.users.record_activity(&actor, "opened", &path, "");
+    }
+    result
 }
 
 #[derive(serde::Deserialize)]

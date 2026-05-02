@@ -6,6 +6,7 @@ import { useNotebookStore } from '../stores/notebookStore';
 import { useUIStore } from '../stores/uiStore';
 import { executeCommand } from '../plugins/registry';
 import { FileDown, Loader2 } from 'lucide-react';
+import { FFModalShell } from './modals/FFModalShell';
 
 type Format = string; // 'pdf' | 'html' | plugin-contributed formats
 
@@ -150,111 +151,157 @@ export function ExportModal({ onClose }: Props) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel w-[480px] max-h-[85vh] flex flex-col"
-        onClick={e => e.stopPropagation()}>
-        <div className="px-6 pt-6 pb-3 shrink-0">
-          <h3 className="text-base font-semibold text-text">{t('export.exportNotebook')}</h3>
-        </div>
-
-        {/* format tabs — built-in + plugin-contributed */}
-        <div className="px-6 pb-3 flex gap-2 flex-wrap">
-          {[
-            { id: 'pdf', label: t('export.pdfTypst') },
-            { id: 'html', label: t('export.html') },
-            ...pluginFormats.map(f => ({ id: f.id, label: f.label })),
-          ].map(f => (
-            <button key={f.id} onClick={() => setFormat(f.id)}
-              className={`flex-1 py-2 text-sm rounded-lg border transition-colors ${
-                format === f.id ? 'bg-accent/15 text-accent border-accent/30' : 'border-border text-text-secondary hover:bg-bg-hover'
-              }`}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* PDF: template + variables */}
-        {format === 'pdf' && (
-          <div className="px-6 pb-3 overflow-y-auto flex-1 space-y-4">
-            {templates.length > 0 && (
-              <div>
-                <label className="text-xs text-text-muted block mb-1.5">{t('export.template')}</label>
-                <div className="space-y-1">
-                  {templates.map(t => (
-                    <button key={t.name} onClick={() => setSelected(t.name)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                        selected === t.name
-                          ? 'bg-accent/15 text-accent border border-accent/30'
-                          : 'hover:bg-bg-hover border border-transparent'
-                      }`}>
-                      {t.name}
-                      {t.variables.length > 0 && (
-                        <span className="text-text-muted text-xs ml-2">({t.variables.length} vars)</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {tmplVars.length > 0 && (
-              <div>
-                <label className="text-xs text-text-muted block mb-1.5">{t('export.variables')}</label>
-                <div className="space-y-2">
-                  {tmplVars.map(v => {
-                    const isImageVar = /logo|image|icon|img/i.test(v.key)
-                      || /\.(png|jpg|jpeg|svg|webp)$/i.test(v.default_value);
-                    const currentTmpl = templates.find(t => t.name === selected);
-                    const imageAssets = (currentTmpl?.assets ?? []).filter(
-                      a => /\.(png|jpg|jpeg|svg|webp)$/i.test(a),
-                    );
-
-                    return (
-                      <div key={v.key} className="flex items-center gap-2">
-                        <span className="text-xs text-text-muted w-28 shrink-0 text-right">
-                          {labels[v.key] ?? v.key}
-                        </span>
-                        {isImageVar && imageAssets.length > 0 ? (
-                          <select
-                            value={vars[v.key] ?? v.default_value}
-                            onChange={e => setVars(prev => ({ ...prev, [v.key]: e.target.value }))}
-                            className="field flex-1"
-                          >
-                            <option value="">{t('export.noImage')}</option>
-                            {imageAssets.map(a => (
-                              <option key={a} value={a}>{a}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            value={vars[v.key] ?? v.default_value}
-                            onChange={e => setVars(prev => ({ ...prev, [v.key]: e.target.value }))}
-                            className="field flex-1"
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {error && (
-          <div className="mx-6 mb-3 px-3 py-2 bg-error/10 text-error text-xs rounded">{error}</div>
-        )}
-
-        <div className="px-6 pb-5 pt-2 border-t border-border flex gap-2 shrink-0">
-          <button onClick={doExport} disabled={exporting} className="btn btn-lg btn-primary flex-1">
-            {exporting ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
-            {exporting ? t('export.exporting') : t('export.exportFormat', { format: format.toUpperCase() })}
+    <FFModalShell
+      title={t('export.exportNotebook')}
+      subtitle={`${format.toUpperCase()} export · ${selected || 'no template'}`}
+      width={520}
+      hideFooter
+      onClose={onClose}
+    >
+      {/* Format tabs */}
+      <div className="flex flex-wrap" style={{ gap: 6, marginBottom: 14 }}>
+        {[
+          { id: 'pdf', label: t('export.pdfTypst') },
+          { id: 'html', label: t('export.html') },
+          ...pluginFormats.map(f => ({ id: f.id, label: f.label })),
+        ].map(f => (
+          <button key={f.id} onClick={() => setFormat(f.id)}
+            style={{
+              flex: 1, minWidth: 80, padding: '8px 12px',
+              borderRadius: 6, fontSize: 12, fontWeight: 500,
+              background: format === f.id
+                ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)'
+                : 'var(--color-bg-elevated)',
+              color: format === f.id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+              border: format === f.id
+                ? '1px solid var(--color-accent)'
+                : '1px solid var(--color-border)',
+              cursor: 'pointer',
+            }}>
+            {f.label}
           </button>
-          <button onClick={onClose} className="btn btn-lg btn-ghost">
-            {t('common.cancel')}
-          </button>
-        </div>
+        ))}
       </div>
-    </div>
+
+      {format === 'pdf' && (
+        <div style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+          {templates.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="uppercase" style={{
+                fontSize: 11, color: 'var(--color-text-secondary)',
+                marginBottom: 6, letterSpacing: '0.04em', fontWeight: 500,
+              }}>{t('export.template')}</div>
+              <div className="flex flex-col" style={{ gap: 4 }}>
+                {templates.map(tpl => (
+                  <button key={tpl.name} onClick={() => setSelected(tpl.name)}
+                    style={{
+                      width: '100%', textAlign: 'left',
+                      padding: '8px 12px', borderRadius: 6, fontSize: 13,
+                      background: selected === tpl.name
+                        ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)'
+                        : 'transparent',
+                      color: selected === tpl.name ? 'var(--color-accent)' : 'var(--color-text)',
+                      border: selected === tpl.name
+                        ? '1px solid var(--color-accent)'
+                        : '1px solid transparent',
+                      cursor: 'pointer',
+                    }}>
+                    {tpl.name}
+                    {tpl.variables.length > 0 && (
+                      <span className="text-text-muted ml-2" style={{ fontSize: 11 }}>
+                        ({tpl.variables.length} vars)
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tmplVars.length > 0 && (
+            <div>
+              <div className="uppercase" style={{
+                fontSize: 11, color: 'var(--color-text-secondary)',
+                marginBottom: 6, letterSpacing: '0.04em', fontWeight: 500,
+              }}>{t('export.variables')}</div>
+              <div className="flex flex-col" style={{ gap: 8 }}>
+                {tmplVars.map(v => {
+                  const isImageVar = /logo|image|icon|img/i.test(v.key)
+                    || /\.(png|jpg|jpeg|svg|webp)$/i.test(v.default_value);
+                  const currentTmpl = templates.find(t => t.name === selected);
+                  const imageAssets = (currentTmpl?.assets ?? []).filter(
+                    a => /\.(png|jpg|jpeg|svg|webp)$/i.test(a),
+                  );
+                  return (
+                    <div key={v.key} className="flex items-center" style={{ gap: 8 }}>
+                      <span className="shrink-0 text-right" style={{
+                        fontSize: 11, color: 'var(--color-text-muted)', width: 112,
+                      }}>{labels[v.key] ?? v.key}</span>
+                      {isImageVar && imageAssets.length > 0 ? (
+                        <select
+                          value={vars[v.key] ?? v.default_value}
+                          onChange={e => setVars(prev => ({ ...prev, [v.key]: e.target.value }))}
+                          className="field flex-1"
+                        >
+                          <option value="">{t('export.noImage')}</option>
+                          {imageAssets.map(a => (
+                            <option key={a} value={a}>{a}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={vars[v.key] ?? v.default_value}
+                          onChange={e => setVars(prev => ({ ...prev, [v.key]: e.target.value }))}
+                          className="field flex-1"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="text-[12px] rounded-lg" style={{
+          marginTop: 12, padding: '8px 12px',
+          background: 'rgba(239,68,68,0.10)',
+          border: '1px solid rgba(239,68,68,0.20)',
+          color: 'var(--color-error)',
+        }}>{error}</div>
+      )}
+
+      {/* Custom footer — primary keeps the spinner state during export. */}
+      <div className="flex justify-end" style={{
+        marginTop: 16, paddingTop: 14, gap: 8,
+        borderTop: '1px solid var(--color-border-subtle)',
+      }}>
+        <button onClick={onClose}
+          style={{
+            padding: '8px 14px', background: 'transparent',
+            border: '1px solid var(--color-border)', borderRadius: 6,
+            color: 'var(--color-text-secondary)', fontSize: 13, cursor: 'pointer',
+          }}>
+          {t('common.cancel')}
+        </button>
+        <button onClick={doExport} disabled={exporting}
+          className="inline-flex items-center"
+          style={{
+            padding: '8px 14px',
+            background: 'var(--color-accent)',
+            border: 'none', borderRadius: 6,
+            color: 'var(--color-accent-fg)',
+            fontSize: 13, fontWeight: 600,
+            cursor: exporting ? 'not-allowed' : 'pointer',
+            opacity: exporting ? 0.6 : 1,
+            gap: 6,
+          }}>
+          {exporting ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
+          {exporting ? t('export.exporting') : t('export.exportFormat', { format: format.toUpperCase() })}
+        </button>
+      </div>
+    </FFModalShell>
   );
 }

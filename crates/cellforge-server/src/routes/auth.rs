@@ -169,7 +169,15 @@ pub async fn register(
 
     let is_first = !state.users.has_users();
     let display = req.display_name.unwrap_or_else(|| req.username.clone());
-    match state.users.register(&req.username, &req.password, &display) {
+    // For non-bootstrap registrations the caller is always an admin
+    // (the FORBIDDEN check above ensures it). Their username is the
+    // attribution we want recorded on the new user's row.
+    let created_by: String = if is_first {
+        String::new()
+    } else {
+        extract_user(&headers).unwrap_or_default()
+    };
+    match state.users.register(&req.username, &req.password, &display, &created_by) {
         Ok(user) => {
             if is_first {
                 // first user = self-registration, log them in
@@ -284,14 +292,36 @@ pub async fn delete_user(
     headers: axum::http::HeaderMap,
     axum::extract::Path(username): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    let caller = extract_user(&headers);
-    let is_admin = caller
-        .and_then(|n| state.users.get_user(&n).ok())
-        .is_some_and(|u| u.is_admin);
-    if !is_admin {
+    let caller_name = match extract_user(&headers) {
+        Some(n) => n,
+        None => return StatusCode::UNAUTHORIZED,
+    };
+    let caller = match state.users.get_user(&caller_name) {
+        Ok(u) => u,
+        Err(_) => return StatusCode::FORBIDDEN,
+    };
+    if !caller.is_admin {
         return StatusCode::FORBIDDEN;
     }
-    let _ = state.users.delete_user(&username);
+    if caller_name == username {
+        // No self-delete — admins shouldn't be able to lock themselves out
+        // of their own workspace; the bootstrap admin doubly so.
+        return StatusCode::FORBIDDEN;
+    }
+    // Look up the target's role. A non-admin can be removed by any admin;
+    // removing an admin requires the bootstrap super-admin.
+    let target = match state.users.get_user(&username) {
+        Ok(u) => u,
+        Err(_) => return StatusCode::NOT_FOUND,
+    };
+    if target.is_admin && !caller.is_super_admin {
+        return StatusCode::FORBIDDEN;
+    }
+    if target.is_super_admin {
+        // Hard rule: nothing inside the app can remove the workspace owner.
+        return StatusCode::FORBIDDEN;
+    }
+    let _ = state.users.delete_user(&username, caller.is_super_admin);
     StatusCode::NO_CONTENT
 }
 

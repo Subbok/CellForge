@@ -209,24 +209,38 @@ impl KernelManager {
         self.start(&spec_name, cwd.as_deref(), &extras).await
     }
 
-    /// Returns `(kernel_id, rss_mb)` for every running kernel, summing the
-    /// resident-set-size of the kernel process and every descendant it
-    /// spawned (so `multiprocessing` workers, torch DataLoader subprocs, etc.
-    /// show up in the admin panel). Cross-platform via `sysinfo` — works on
-    /// Linux / macOS / Windows with the same code path.
-    pub fn sample_memory(&self) -> Vec<(String, i64)> {
-        let mut sys = sysinfo::System::new();
+    /// Returns `(kernel_id, rss_mb, cpu_pct)` for every running kernel.
+    ///
+    /// `rss_mb` sums the resident-set-size of the kernel process and every
+    /// descendant it spawned (multiprocessing pools, torch DataLoader workers,
+    /// etc.). On Linux PSS is used so shared pages from `fork()` aren't
+    /// counted N times.
+    ///
+    /// `cpu_pct` is normalised to total system capacity (0–100). sysinfo
+    /// reports per-core percentages internally (e.g. 200% means "two cores
+    /// fully busy"), so we divide the per-tree sum by `cpu_count` to land on
+    /// "% of whole machine". A kernel saturating one core on a 16-core box
+    /// reads ~6%, which is what an admin actually wants to see when judging
+    /// load.
+    ///
+    /// Caller passes a long-lived `sys` because `Process::cpu_usage()`
+    /// computes its result against the previous refresh — a fresh `System`
+    /// would always return 0.
+    pub fn sample_metrics(&self, sys: &mut sysinfo::System) -> Vec<(String, i64, i64)> {
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let cpu_count = sys.cpus().len().max(1) as f32;
 
         self.kernels
             .iter()
             .map(|(id, k)| {
-                let bytes = k
-                    .child
-                    .id()
-                    .map(|pid| tree_rss_bytes(&sys, sysinfo::Pid::from_u32(pid)))
-                    .unwrap_or(0);
-                (id.clone(), (bytes / 1024 / 1024) as i64)
+                let Some(pid) = k.child.id() else {
+                    return (id.clone(), 0i64, 0i64);
+                };
+                let root = sysinfo::Pid::from_u32(pid);
+                let bytes = tree_rss_bytes(sys, root);
+                let cpu_per_core = tree_cpu_pct(sys, root);
+                let cpu_pct = ((cpu_per_core / cpu_count).clamp(0.0, 100.0)).round() as i64;
+                (id.clone(), (bytes / 1024 / 1024) as i64, cpu_pct)
             })
             .collect()
     }
@@ -288,6 +302,35 @@ fn tree_rss_bytes(sys: &sysinfo::System, root: sysinfo::Pid) -> u64 {
         let is_thread = sys.process(pid).and_then(|p| p.thread_kind()).is_some();
         if !is_thread {
             total = total.saturating_add(process_memory_bytes(sys, pid));
+        }
+        for (child_pid, child_proc) in sys.processes() {
+            if child_proc.parent() == Some(pid) && !visited.contains(child_pid) {
+                pending.push(*child_pid);
+            }
+        }
+    }
+    total
+}
+
+/// Sum the per-core CPU usage of `root` and every descendant. Skips threads
+/// for the same reason `tree_rss_bytes` does — sysinfo reports each thread
+/// as its own pseudo-process, and threads inherit the task-group leader's
+/// cpu_usage, so summing them N-counts the actual CPU work.
+///
+/// Returned value is in sysinfo's native "per-core %" — caller normalises
+/// by dividing by `cpu_count` to get a 0–100 system-wide reading.
+fn tree_cpu_pct(sys: &sysinfo::System, root: sysinfo::Pid) -> f32 {
+    let mut pending = vec![root];
+    let mut visited = std::collections::HashSet::new();
+    let mut total = 0.0f32;
+    while let Some(pid) = pending.pop() {
+        if !visited.insert(pid) {
+            continue;
+        }
+        if let Some(p) = sys.process(pid) {
+            if p.thread_kind().is_none() {
+                total += p.cpu_usage();
+            }
         }
         for (child_pid, child_proc) in sys.processes() {
             if child_proc.parent() == Some(pid) && !visited.contains(child_pid) {

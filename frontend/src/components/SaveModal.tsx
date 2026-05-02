@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Save, LogOut } from 'lucide-react';
+import { FFModalShell } from './modals/FFModalShell';
 
 interface Props {
   onSave: () => void;
@@ -10,26 +10,54 @@ interface Props {
 export function SaveModal({ onSave, onDiscard, onCancel }: Props) {
   const { t } = useTranslation();
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-panel w-[380px] p-6" onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-text mb-2">{t('save.unsavedChanges')}</h3>
-        <p className="text-sm text-text-muted mb-5">
-          {t('save.saveBeforeLeaving')}
-        </p>
-        <div className="flex gap-2">
-          <button onClick={onSave} className="btn btn-md btn-primary flex-1">
-            <Save size={14} />
-            {t('common.save')}
-          </button>
-          <button onClick={onDiscard} className="btn btn-md btn-danger flex-1">
-            <LogOut size={14} />
-            {t('save.dontSave')}
-          </button>
-          <button onClick={onCancel} className="btn btn-md btn-ghost">
-            {t('common.cancel')}
-          </button>
-        </div>
+    <FFModalShell
+      title={t('save.unsavedChanges')}
+      subtitle={t('save.saveBeforeLeaving')}
+      width={460}
+      hideFooter
+      onClose={onCancel}
+    >
+      <div className="flex" style={{ gap: 8, justifyContent: 'flex-end' }}>
+        <button
+          onClick={onCancel}
+          style={{
+            padding: '8px 14px',
+            background: 'transparent',
+            border: '1px solid var(--color-border)',
+            borderRadius: 6,
+            color: 'var(--color-text-secondary)',
+            fontSize: 13, cursor: 'pointer',
+          }}
+        >
+          {t('common.cancel')}
+        </button>
+        <button
+          onClick={onDiscard}
+          style={{
+            padding: '8px 14px',
+            background: 'rgba(239,68,68,0.10)',
+            border: '1px solid rgba(239,68,68,0.30)',
+            borderRadius: 6,
+            color: '#fca5a5',
+            fontSize: 13, cursor: 'pointer',
+          }}
+        >
+          {t('save.dontSave')}
+        </button>
+        <button
+          onClick={onSave}
+          style={{
+            padding: '8px 14px',
+            background: 'var(--color-accent)',
+            border: 'none',
+            borderRadius: 6,
+            color: 'var(--color-accent-fg)',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          {t('common.save')}
+        </button>
       </div>
-    </div>
+    </FFModalShell>
   );
 }

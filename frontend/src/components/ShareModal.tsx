@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { api } from '../services/api';
+import { FFModalShell } from './modals/FFModalShell';
+
+/** Avatar palette cycled by row index — same as the Admin members table. */
+const AVATAR_PALETTE = ['#ffaa3b', '#7ec4cf', '#b39ddb', '#a6c780', '#e8a87c', '#cba6f7'];
 
 /**
  * Share dialog. Loads the current outbound shares for the target file on
@@ -26,8 +28,6 @@ export function ShareModal({
   onError: (s: string) => void;
   onRefresh: () => Promise<void>;
 }) {
-  const { t } = useTranslation();
-
   useEffect(() => {
     onRefresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -35,60 +35,95 @@ export function ShareModal({
 
   const sharedWithSet = new Set(outboundShares.map(s => s.to_user));
   const pickerUsers = shareUsers.filter(u => !sharedWithSet.has(u.username));
+  const folder = filePath.includes('/')
+    ? filePath.slice(0, filePath.lastIndexOf('/'))
+    : '';
 
-  // Render in a portal anchored to <body>. Headers in TopBar and Dashboard
-  // use `backdrop-blur`, which establishes a containing block for `fixed`
-  // descendants — without the portal, `modal-backdrop`'s `fixed inset-0`
-  // would anchor to the header (h-11) and the modal would stick to the top
-  // of the screen.
-  return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel w-[360px] p-6" onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-text mb-2">Share file</h3>
-        <p className="text-xs text-text-muted mb-4">
-          <strong className="text-text">{fileName}</strong>
-        </p>
-
-        {outboundShares.length > 0 && (
-          <div className="mb-4">
-            <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2">
-              Currently shared with
-            </p>
-            <div className="space-y-1">
-              {outboundShares.map(s => (
-                <div key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-bg-secondary/50">
-                  <span className="text-sm text-text flex-1">@{s.to_user}</span>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await api.unshareFile(s.id);
-                        await onRefresh();
-                      } catch (e: unknown) {
-                        onError(`Unshare failed: ${e instanceof Error ? e.message : String(e)}`);
-                      }
-                    }}
-                    className="p-1 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                    title="Remove share"
-                  >
-                    <X size={13} />
-                  </button>
+  return (
+    <FFModalShell
+      title="Share notebook"
+      subtitle={folder ? `${fileName} · ${folder}/` : fileName}
+      width={520}
+      hideFooter
+      onClose={onClose}
+    >
+      {outboundShares.length > 0 && (
+        <>
+          <div className="uppercase" style={{
+            fontSize: 11, color: 'var(--color-text-secondary)',
+            marginBottom: 8, letterSpacing: '0.04em', fontWeight: 500,
+          }}>Members with access</div>
+          <div className="overflow-hidden" style={{
+            background: 'var(--color-bg-elevated)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 7,
+            marginBottom: 14,
+          }}>
+            {outboundShares.map((s, i) => (
+              <div key={s.id} className="flex items-center" style={{
+                gap: 10, padding: '10px 12px',
+                borderTop: i ? '1px solid var(--color-border-subtle)' : 'none',
+              }}>
+                <div style={{
+                  width: 24, height: 24, borderRadius: '50%',
+                  background: AVATAR_PALETTE[i % AVATAR_PALETTE.length],
+                  color: '#1a1815',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, fontWeight: 600,
+                }}>
+                  {s.to_user[0].toUpperCase()}
                 </div>
-              ))}
-            </div>
+                <span className="font-mono flex-1" style={{ fontSize: 13, color: 'var(--color-text)' }}>
+                  @{s.to_user}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Can edit</span>
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.unshareFile(s.id);
+                      await onRefresh();
+                    } catch (e: unknown) {
+                      onError(`Unshare failed: ${e instanceof Error ? e.message : String(e)}`);
+                    }
+                  }}
+                  className="text-text-muted hover:text-error"
+                  style={{
+                    width: 20, height: 20, borderRadius: 4,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                  }}
+                  title="Remove share"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
           </div>
-        )}
+        </>
+      )}
 
-        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2">
-          Share with user
+      <div className="uppercase" style={{
+        fontSize: 11, color: 'var(--color-text-secondary)',
+        marginBottom: 8, letterSpacing: '0.04em', fontWeight: 500,
+      }}>Add members</div>
+      {pickerUsers.length === 0 ? (
+        <p className="text-center" style={{
+          padding: '20px 0', fontSize: 12, color: 'var(--color-text-muted)',
+        }}>
+          {shareUsers.length === 0
+            ? 'No other users in the workspace.'
+            : 'Already shared with every other user.'}
         </p>
-        {pickerUsers.length === 0 ? (
-          <p className="text-xs text-text-muted py-4 text-center">
-            {shareUsers.length === 0 ? 'No other users' : 'Shared with everyone else already'}
-          </p>
-        ) : (
-          <div className="space-y-1 mb-4">
-            {pickerUsers.map(u => (
-              <button key={u.username} onClick={async () => {
+      ) : (
+        <div className="overflow-hidden" style={{
+          background: 'var(--color-bg-elevated)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 7,
+        }}>
+          {pickerUsers.map((u, i) => (
+            <button
+              key={u.username}
+              onClick={async () => {
                 try {
                   await api.shareFile(filePath, u.username);
                   await onRefresh();
@@ -96,18 +131,34 @@ export function ShareModal({
                   onError(`Share failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
               }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-bg-hover text-sm text-text transition-colors">
-                {u.display_name || u.username} <span className="text-text-muted">@{u.username}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <button onClick={onClose} className="btn btn-md btn-ghost w-full">
-          {t('common.cancel')}
-        </button>
-      </div>
-    </div>,
-    document.body,
+              className="w-full text-left flex items-center hover:bg-bg-hover transition-colors"
+              style={{
+                gap: 10, padding: '10px 12px',
+                borderTop: i ? '1px solid var(--color-border-subtle)' : 'none',
+                background: 'transparent', border: 'none', cursor: 'pointer',
+              }}
+            >
+              <div style={{
+                width: 24, height: 24, borderRadius: '50%',
+                background: AVATAR_PALETTE[(outboundShares.length + i) % AVATAR_PALETTE.length],
+                color: '#1a1815',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontWeight: 600,
+              }}>
+                {u.username[0].toUpperCase()}
+              </div>
+              <span className="font-mono flex-1" style={{ fontSize: 13, color: 'var(--color-text)' }}>
+                @{u.username}
+              </span>
+              {u.display_name && (
+                <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                  {u.display_name}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </FFModalShell>
   );
 }

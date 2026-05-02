@@ -1,5 +1,9 @@
-import { Play, PlayCircle, RotateCcw, Square, Save, Eraser, Download, PanelRightClose, PanelRightOpen, LayoutTemplate, Code2, Cpu, ChevronDown, Plug, Share2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Play, RotateCcw, Square, Save, Eraser, Download, PanelRightClose,
+  PanelRightOpen, LayoutTemplate, Code2, ChevronDown, Plug, Share2,
+  MoreHorizontal,
+} from 'lucide-react';
 import { useNotebookStore } from '../../stores/notebookStore';
 import { useKernelStore } from '../../stores/kernelStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -13,48 +17,101 @@ import { broadcastCellOp, broadcastSaved, isActive as isCollabActive } from '../
 import { FileName } from './FileName';
 import { PresenceIndicator } from './PresenceIndicator';
 import { ShareModal } from '../ShareModal';
+import { FFModalShell, FFCheckRow } from '../modals/FFModalShell';
 
-function kernelDot(status: string) {
-  if (status === 'idle') return 'bg-success';
-  if (status === 'busy' || status === 'starting' || status === 'restarting') return 'bg-warning';
-  if (status === 'dead') return 'bg-error';
-  return 'bg-text-muted';
+function kernelDotColor(status: string) {
+  if (status === 'idle') return '#4ade80';
+  if (status === 'busy' || status === 'starting' || status === 'restarting') return '#fbbf24';
+  if (status === 'dead') return '#ef4444';
+  return 'var(--color-text-muted)';
 }
 
-function Btn({ title, onClick, children, disabled, primary }: {
+/** Compact pill button — secondary chrome, optional accent variant. */
+function ChipButton({
+  title, onClick, children, primary, disabled,
+}: {
   title: string;
   onClick?: () => void;
   children: React.ReactNode;
-  disabled?: boolean;
-  /** Primary gets a tinted accent background so it stands out in the toolbar. */
   primary?: boolean;
+  disabled?: boolean;
 }) {
-  const base = 'p-1.5 rounded transition-colors disabled:opacity-30';
-  const color = primary
-    ? 'bg-accent/15 text-accent hover:bg-accent/25'
-    : 'hover:bg-bg-hover text-text-secondary';
   return (
-    <button onClick={onClick} disabled={disabled} title={title} className={`${base} ${color}`}>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="inline-flex items-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      style={{
+        gap: 6,
+        padding: '6px 10px',
+        borderRadius: 6,
+        fontSize: 12, fontWeight: primary ? 600 : 500,
+        background: primary ? 'var(--color-accent)' : 'var(--color-bg-elevated)',
+        border: primary ? 'none' : '1px solid var(--color-border)',
+        color: primary ? 'var(--color-accent-fg)' : 'var(--color-text)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
       {children}
     </button>
   );
 }
 
-export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
-  onGoHome: () => void; onExport: () => void; onSwitchKernel: () => void;
+export function TopBar({ onExport, onSwitchKernel }: {
+  onExport: () => void; onSwitchKernel: () => void;
 }) {
   const { cells, activeCellId, dirty } = useNotebookStore();
   const { status, spec, availableSpecs } = useKernelStore();
-  const { sidebarOpen, toggleSidebar, appMode, toggleAppMode } = useUIStore();
+  const sidebarOpen = useUIStore(s => s.sidebarOpen);
+  const toggleSidebar = useUIStore(s => s.toggleSidebar);
+  const sidebarSide = useUIStore(s => s.sidebarSide);
+  const appMode = useUIStore(s => s.appMode);
+  const toggleAppMode = useUIStore(s => s.toggleAppMode);
   const pluginButtons = useUIStore(s => s.pluginToolbarButtons);
   const execute = useExecuteCell();
 
-  // Share modal state — opens over the notebook when the user clicks the
-  // share button in the top bar. Data is loaded lazily on open.
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUsers, setShareUsers] = useState<{ username: string; display_name: string }[]>([]);
   const [outboundShares, setOutboundShares] = useState<{ id: number; to_user: string }[]>([]);
   const [shareError, setShareError] = useState<string>('');
+
+  const [restartOpen, setRestartOpen] = useState(false);
+  const [restartRunAll, setRestartRunAll] = useState(false);
+
+  // Track last successful save so we can surface "Saved 12s ago" in the
+  // header chip — matches the JSX baseline.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    if (!savedAt) return;
+    const id = setInterval(() => setSavedTick(t => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, [savedAt]);
+
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  function doRestart() {
+    useKernelStore.getState().setStatus('restarting');
+    useVariableStore.getState().clearAll();
+    clearQueue();
+    ws.reconnect(spec ?? 'python3', useNotebookStore.getState().filePath ?? undefined);
+    setRestartOpen(false);
+    if (restartRunAll) {
+      const codeIds = useNotebookStore.getState().cells
+        .filter(c => c.cell_type === 'code')
+        .map(c => c.id);
+      queueCells(codeIds);
+    }
+  }
 
   async function openShare() {
     const filePath = useNotebookStore.getState().filePath;
@@ -83,8 +140,6 @@ export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
     if (isCollabActive()) broadcastCellOp({ type: 'clear_outputs' });
   }
 
-
-
   async function save() {
     const nb = useNotebookStore.getState();
     if (!nb.filePath) return;
@@ -101,100 +156,183 @@ export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
       })),
     });
     useNotebookStore.setState({ dirty: false });
+    setSavedAt(Date.now());
     broadcastSaved();
   }
 
-  return (
-    <header className="h-11 flex items-center px-4 border-b border-border/60 bg-bg/90 backdrop-blur-sm gap-3 shrink-0">
-      <button onClick={onGoHome} className="font-semibold text-accent text-sm tracking-tight hover:text-accent-hover transition-colors">
-        CellForge
-      </button>
-      <div className="h-4 w-px bg-border/50" />
+  function savedAgoLabel(): string {
+    if (dirty) return 'Unsaved';
+    if (!savedAt) return 'Saved';
+    const diff = Date.now() - savedAt + savedTick * 0; // touch tick so re-renders pick up
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return `Saved ${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `Saved ${minutes}m ago`;
+    return 'Saved a while ago';
+  }
 
+  const kernelLabel =
+    availableSpecs.find(s => s.name === spec)?.display_name ?? spec ?? 'No kernel';
+  const dotColor = kernelDotColor(status);
+
+  return (
+    <header
+      className="flex items-center shrink-0"
+      style={{
+        height: 48,
+        padding: '0 16px 0 20px',
+        gap: 12,
+        background: 'var(--color-bg)',
+        borderBottom: '1px solid var(--color-border-subtle)',
+      }}
+    >
       <FileName />
+
+      {/* Kernel chip — strips parenthesised qualifiers ("(ipykernel)" etc.)
+          for a cleaner short label. Full name remains in the tooltip. */}
+      <button
+        onClick={onSwitchKernel}
+        title={`${kernelLabel} · click to switch`}
+        className="inline-flex items-center shrink-0 transition-colors"
+        style={{
+          gap: 6, padding: '4px 10px',
+          borderRadius: 4, fontSize: 11,
+          background: `color-mix(in srgb, ${dotColor} 12%, transparent)`,
+          color: dotColor,
+          border: 'none', cursor: 'pointer',
+        }}
+      >
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%', background: dotColor, flexShrink: 0,
+          ...(status === 'busy' ? { animation: 'cell-running-glow 1.5s ease-in-out infinite' } : {}),
+        }} />
+        <span style={{ whiteSpace: 'nowrap' }}>
+          {kernelLabel.replace(/\s*\([^)]*\)\s*$/, '').trim() || kernelLabel}
+        </span>
+        <ChevronDown size={10} style={{ opacity: 0.7, flexShrink: 0 }} />
+      </button>
+
+      {/* Saved chip */}
+      <span
+        title={dirty ? 'Notebook has unsaved changes' : 'All changes saved'}
+        style={{
+          padding: '3px 8px', borderRadius: 4, fontSize: 11,
+          background: dirty
+            ? 'color-mix(in srgb, var(--color-warning) 14%, transparent)'
+            : 'var(--color-bg-hover)',
+          color: dirty ? 'var(--color-warning)' : 'var(--color-text-muted)',
+        }}
+      >
+        {savedAgoLabel()}
+      </span>
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-1">
-        {/* primary action — tinted so Run stands out from the rest of the cluster */}
-        <Btn title="Run cell (Shift+Enter)" onClick={runActiveCell} primary><Play size={16} /></Btn>
-        <Btn title="Run all cells" onClick={runAllCells}><PlayCircle size={16} /></Btn>
-        <Btn title="Clear all outputs" onClick={clearAllOutputs}><Eraser size={16} /></Btn>
-        <Btn title="Restart kernel" onClick={() => {
-          useKernelStore.getState().setStatus('restarting');
-          useVariableStore.getState().clearAll();
-          clearQueue();
-          ws.reconnect(spec ?? 'python3', useNotebookStore.getState().filePath ?? undefined);
-        }}><RotateCcw size={16} /></Btn>
-        <Btn title="Interrupt" onClick={() => {
-          ws.send('interrupt');
-          clearQueue();
-        }}><Square size={16} /></Btn>
-        <div className="h-4 w-px bg-border/50 mx-0.5" />
-        <Btn title="Save (Ctrl+S)" onClick={save} disabled={!dirty}><Save size={16} /></Btn>
-        <Btn title="Share" onClick={openShare}><Share2 size={16} /></Btn>
-        <Btn title="Export" onClick={onExport}><Download size={16} /></Btn>
-        <div className="h-4 w-px bg-border/50 mx-0.5" />
-        <button
-          onClick={toggleAppMode}
-          title={appMode ? 'Switch to Editor Mode' : 'Switch to App Mode'}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-            appMode
-              ? 'bg-accent/10 border-accent text-accent'
-              : 'bg-bg-elevated border-border text-text-secondary hover:border-text-secondary/30'
-          }`}
-        >
-          {appMode ? <LayoutTemplate size={14} /> : <Code2 size={14} />}
-          {appMode ? 'App' : 'Code'}
-        </button>
-      </div>
-
-      {/* plugin-contributed toolbar buttons */}
-      {pluginButtons.length > 0 && (
-        <>
-          <div className="h-4 w-px bg-border/50" />
-          <div className="flex items-center gap-1">
-            {pluginButtons.map(btn => (
-              <button
-                key={btn.id}
-                onClick={() => executeCommand(btn.command)}
-                title={btn.label}
-                className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium
-                  text-text-secondary hover:bg-bg-hover hover:text-text transition-colors"
-              >
-                <Plug size={12} />
-                {btn.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
+      {/* Collaborators */}
       <PresenceIndicator />
 
-      <div className="h-4 w-px bg-border/50" />
-
-      {/* kernel switcher — styled as a chip so it reads as interactive */}
+      {/* App / Code mode toggle */}
       <button
-        onClick={onSwitchKernel}
-        title="Click to switch kernel"
-        className="group flex items-center gap-2 px-2.5 h-7 rounded-lg border border-border bg-bg-elevated
-          hover:border-text-muted/50 hover:bg-bg-hover transition-colors"
+        onClick={toggleAppMode}
+        title={appMode ? 'Switch to Editor Mode' : 'Switch to App Mode'}
+        className="inline-flex items-center transition-colors"
+        style={{
+          gap: 5, padding: '5px 10px',
+          borderRadius: 6, fontSize: 12, fontWeight: 500,
+          background: appMode
+            ? 'color-mix(in srgb, var(--color-accent) 12%, transparent)'
+            : 'var(--color-bg-elevated)',
+          border: appMode ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
+          color: appMode ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+          cursor: 'pointer',
+        }}
       >
-        <Cpu size={13} className="text-text-muted group-hover:text-text-secondary transition-colors shrink-0" />
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${kernelDot(status)}`} />
-        <span className="text-xs text-text truncate max-w-[14ch]">
-          {availableSpecs.find(s => s.name === spec)?.display_name ?? spec ?? 'No kernel'}
-        </span>
-        <span className="text-[9px] uppercase tracking-wider font-semibold text-text-muted px-1 py-0.5 rounded bg-bg-hover/60">
-          {status}
-        </span>
-        <ChevronDown size={11} className="text-text-muted shrink-0" />
+        {appMode ? <LayoutTemplate size={12} /> : <Code2 size={12} />}
+        {appMode ? 'App' : 'Code'}
       </button>
 
-      <Btn title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'} onClick={toggleSidebar}>
-        {sidebarOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-      </Btn>
+      {/* Action cluster: Run all · Clear · Restart · Share · Export · More */}
+      <div className="flex items-center" style={{ gap: 6 }}>
+        <ChipButton title="Run all cells" onClick={runAllCells}>
+          <Play size={12} /> Run all
+        </ChipButton>
+        <ChipButton title="Clear all outputs" onClick={clearAllOutputs}>
+          <Eraser size={12} /> Clear
+        </ChipButton>
+        <ChipButton
+          title="Restart kernel"
+          onClick={() => { setRestartRunAll(false); setRestartOpen(true); }}
+        >
+          <RotateCcw size={12} /> Restart
+        </ChipButton>
+        <ChipButton title="Share" onClick={openShare}>
+          <Share2 size={12} /> Share
+        </ChipButton>
+        <ChipButton title="Export" onClick={onExport} primary>
+          <Download size={12} /> Export
+        </ChipButton>
+
+        {/* More — secondary actions tucked away */}
+        <div className="relative" ref={moreRef}>
+          <button
+            onClick={() => setMoreOpen(v => !v)}
+            title="More actions"
+            style={{
+              width: 28, height: 28, borderRadius: 6,
+              background: 'var(--color-bg-elevated)',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-secondary)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+          {moreOpen && (
+            <div
+              className="absolute right-0 top-full mt-1 z-30 py-1 w-52 rounded-lg shadow-2xl shadow-black/60"
+              style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+            >
+              <MoreItem icon={<Play size={13} />} label="Run cell" hint="⇧↵"
+                onClick={() => { setMoreOpen(false); runActiveCell(); }} />
+              <MoreItem icon={<Save size={13} />} label="Save" hint="⌘S" disabled={!dirty}
+                onClick={() => { setMoreOpen(false); save(); }} />
+              <MoreItem icon={<Square size={13} />} label="Interrupt"
+                onClick={() => { setMoreOpen(false); ws.send('interrupt'); clearQueue(); }} />
+              {pluginButtons.length > 0 && (
+                <>
+                  <div style={{ borderTop: '1px solid var(--color-border-subtle)' }} className="my-1" />
+                  {pluginButtons.map(btn => (
+                    <MoreItem
+                      key={btn.id}
+                      icon={<Plug size={13} />}
+                      label={btn.label}
+                      onClick={() => { setMoreOpen(false); executeCommand(btn.command); }}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={toggleSidebar}
+        title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+        style={{
+          width: 28, height: 28, borderRadius: 6,
+          background: 'var(--color-bg-elevated)',
+          border: '1px solid var(--color-border)',
+          color: 'var(--color-text-secondary)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+        }}
+      >
+        {sidebarOpen
+          ? (sidebarSide === 'right' ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} className="rotate-180" />)
+          : (sidebarSide === 'right' ? <PanelRightOpen size={14} /> : <PanelRightClose size={14} className="rotate-180" />)}
+      </button>
 
       {shareOpen && (() => {
         const fp = useNotebookStore.getState().filePath ?? '';
@@ -219,6 +357,71 @@ export function TopBar({ onGoHome, onExport, onSwitchKernel }: {
           {shareError}
         </div>
       )}
+
+      {restartOpen && (
+        <FFModalShell
+          title="Restart kernel?"
+          subtitle="All variables, imports and loaded data will be cleared. Cell outputs are preserved."
+          width={440}
+          primaryLabel="Restart kernel"
+          danger
+          onClose={() => setRestartOpen(false)}
+          onPrimary={doRestart}
+        >
+          <div className="flex" style={{
+            gap: 10, padding: 12,
+            background: 'rgba(239,68,68,0.08)',
+            border: '1px solid rgba(239,68,68,0.30)',
+            borderRadius: 7,
+            fontSize: 12, color: '#fca5a5',
+          }}>
+            <RotateCcw size={14} className="shrink-0 mt-px" />
+            <span>
+              Kernel <span className="font-mono" style={{ color: 'var(--color-text)' }}>
+                {useKernelStore.getState().spec ?? 'python3'}
+              </span> is currently {status}.
+              {' '}{cells.filter(c => c.cell_type === 'code' && c.execution_count != null).length} cell(s) have outputs in memory.
+            </span>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <FFCheckRow
+              label="Run all cells after restart"
+              checked={restartRunAll}
+              onChange={setRestartRunAll}
+            />
+          </div>
+        </FFModalShell>
+      )}
     </header>
+  );
+}
+
+function MoreItem({
+  icon, label, hint, onClick, disabled,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  hint?: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full text-left flex items-center hover:bg-bg-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      style={{
+        gap: 8, padding: '7px 12px',
+        fontSize: 13,
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        color: 'var(--color-text)',
+      }}
+    >
+      <span className="text-text-muted">{icon}</span>
+      <span className="flex-1">{label}</span>
+      {hint && (
+        <span className="font-mono" style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{hint}</span>
+      )}
+    </button>
   );
 }

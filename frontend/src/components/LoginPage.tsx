@@ -1,11 +1,46 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
-import { Anvil } from 'lucide-react';
+import { BrandMark } from './brand/BrandMark';
 
 interface Props {
   isFirstUser: boolean;
   onSuccess: (user: { username: string; is_admin: boolean }) => void;
+}
+
+/** Forge field: 12px label above a 10/12 padded input on bg-elevated. */
+function FFField({
+  label, value, onChange, type, autoFocus, onEnter, placeholder, mono,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: 'password' | 'text';
+  autoFocus?: boolean;
+  onEnter?: () => void;
+  placeholder?: string;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <label className="block text-[12px] text-text-secondary mb-1.5">{label}</label>
+      <input
+        type={type ?? 'text'}
+        value={value}
+        autoFocus={autoFocus}
+        onChange={e => onChange(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && onEnter) onEnter(); }}
+        placeholder={placeholder}
+        className={`w-full px-3 py-2.5 rounded-[8px] text-[13px] text-text outline-none transition-colors ${
+          mono || type === 'password' ? 'font-mono' : ''
+        }`}
+        style={{
+          background: 'var(--color-bg-elevated)',
+          border: '1px solid var(--color-border)',
+        }}
+      />
+    </div>
+  );
 }
 
 export function LoginPage({ isFirstUser, onSuccess }: Props) {
@@ -17,6 +52,7 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
 
   async function submit() {
+    if (!username || !password) return;
     setError('');
     setLoading(true);
     try {
@@ -37,103 +73,144 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center relative overflow-hidden">
-      {/* Ambient background glow */}
+    <div
+      className="min-h-screen flex items-center justify-center relative overflow-hidden"
+      style={{
+        background: `
+          radial-gradient(circle 700px at 100% 0%, rgba(167,139,250,0.18), transparent 65%),
+          radial-gradient(circle 700px at 0% 100%, rgba(96,165,250,0.12), transparent 65%),
+          var(--color-bg)
+        `,
+      }}
+    >
+
+      {/* Card */}
       <div
-        className="absolute inset-0 pointer-events-none"
+        className="relative"
         style={{
-          background: `
-            radial-gradient(ellipse 600px 400px at 50% 40%, rgba(122,153,255,0.08), transparent),
-            radial-gradient(ellipse 400px 300px at 30% 70%, rgba(122,153,255,0.04), transparent),
-            radial-gradient(ellipse 300px 200px at 70% 30%, rgba(167,139,250,0.04), transparent)
-          `,
+          width: 460, padding: 44,
+          background: 'var(--color-bg-secondary)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 12,
+          boxShadow: '0 30px 80px rgba(0,0,0,0.5)',
+          zoom: 1.15,
         }}
-      />
-
-      {/* Subtle noise texture */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-[0.03]"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-          backgroundSize: '128px 128px',
-        }}
-      />
-
-      <div className="relative z-10 w-full max-w-[400px] mx-4">
-        {/* Logo area */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 mb-4">
-            <Anvil size={28} className="text-accent" />
-          </div>
-          <h1 className="text-3xl font-bold text-text tracking-tight">CellForge</h1>
-          <p className="text-sm text-text-muted mt-2">
-            {isFirstUser ? t('auth.createAdminAccount') : t('auth.signInToWorkspace')}
-          </p>
-        </div>
-
-        {/* Form card */}
-        <div className="bg-bg-secondary/80 backdrop-blur-xl border border-border/60 rounded-2xl p-8 shadow-2xl shadow-black/30">
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-medium text-text-muted mb-1.5 block">{t('auth.username')}</label>
-              <input
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                autoFocus
-                className="field h-11 rounded-xl bg-bg/60 border-border/60 focus:bg-bg/80 focus:border-accent/60 transition-all"
-              />
-            </div>
-
-            {isFirstUser && (
-              <div>
-                <label className="text-xs font-medium text-text-muted mb-1.5 block">{t('auth.displayName')}</label>
-                <input
-                  value={displayName}
-                  onChange={e => setDisplayName(e.target.value)}
-                  placeholder={t('auth.optional')}
-                  className="field h-11 rounded-xl bg-bg/60 border-border/60 focus:bg-bg/80 focus:border-accent/60 transition-all"
-                />
-              </div>
-            )}
-
-            <div>
-              <label className="text-xs font-medium text-text-muted mb-1.5 block">{t('auth.password')}</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-                className="field h-11 rounded-xl bg-bg/60 border-border/60 focus:bg-bg/80 focus:border-accent/60 transition-all"
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="mt-4 px-4 py-2.5 bg-error/10 border border-error/20 text-error text-xs rounded-xl">
-              {error}
-            </div>
-          )}
-
-          <button
-            onClick={submit}
-            disabled={loading || !username || !password}
-            className="btn btn-lg btn-primary w-full mt-6 h-11 rounded-xl text-sm font-semibold
-                       shadow-lg shadow-accent/20 hover:shadow-accent/30 transition-all duration-200
-                       active:scale-[0.98]"
+      >
+        {/* Brand: mark + wordmark inline */}
+        <div className="flex items-center" style={{ gap: 9 }}>
+          <BrandMark size={28} className="text-text" />
+          <span
+            style={{
+              fontFamily: '"Space Grotesk", system-ui, sans-serif',
+              fontSize: 28 * 0.7,
+              fontWeight: 600,
+              letterSpacing: '-0.015em',
+              color: 'var(--color-text)',
+            }}
           >
-            {loading ? (
-              <span className="inline-flex items-center gap-2">
-                <span className="w-4 h-4 border-2 border-accent-fg/30 border-t-accent-fg rounded-full animate-spin" />
-                {t('auth.signingIn')}
-              </span>
-            ) : isFirstUser ? t('auth.createAdmin') : t('auth.signIn')}
-          </button>
+            Cell<span style={{ color: 'var(--color-accent)' }}>Forge</span>
+          </span>
         </div>
 
-        {/* Footer */}
-        <p className="text-center text-[11px] text-text-muted/50 mt-6">
-          {t('auth.tagline')}
+        {/* Welcome heading */}
+        <h1
+          className="text-[26px] font-semibold"
+          style={{
+            color: 'var(--color-text)',
+            marginTop: 28,
+            lineHeight: 1.2,
+            letterSpacing: '-0.02em',
+          }}
+        >
+          {isFirstUser ? t('auth.workspaceFirstSetup') : t('auth.welcomeBack')}
+        </h1>
+        <p className="text-[14px] text-text-muted" style={{ marginTop: 4 }}>
+          {isFirstUser ? t('auth.createAdminAccount') : t('auth.signInToWorkspace')}
         </p>
+
+        {/* Fields */}
+        <div className="flex flex-col" style={{ marginTop: 28, gap: 14 }}>
+          <FFField
+            label={t('auth.username')}
+            value={username}
+            onChange={setUsername}
+            autoFocus
+            mono
+            onEnter={submit}
+          />
+          {isFirstUser && (
+            <FFField
+              label={t('auth.displayName')}
+              value={displayName}
+              onChange={setDisplayName}
+              placeholder={t('auth.optional')}
+              onEnter={submit}
+            />
+          )}
+          <FFField
+            label={t('auth.password')}
+            value={password}
+            onChange={setPassword}
+            type="password"
+            onEnter={submit}
+          />
+        </div>
+
+        {error && (
+          <div
+            className="text-[12px] rounded-lg"
+            style={{
+              marginTop: 14,
+              padding: '8px 12px',
+              background: 'rgba(239,68,68,0.10)',
+              border: '1px solid rgba(239,68,68,0.20)',
+              color: 'var(--color-error)',
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={submit}
+          disabled={loading || !username || !password}
+          className="w-full transition-colors active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{
+            marginTop: 20,
+            padding: '11px 16px',
+            background: 'var(--color-accent)',
+            color: 'var(--color-accent-fg)',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          {loading ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="w-4 h-4 border-2 rounded-full animate-spin"
+                style={{
+                  borderColor: 'color-mix(in srgb, var(--color-accent-fg) 30%, transparent)',
+                  borderTopColor: 'var(--color-accent-fg)',
+                }} />
+              {t('auth.signingIn')}
+            </span>
+          ) : isFirstUser ? t('auth.createAdmin') : t('auth.signIn')}
+        </button>
+
+        {/* Help line */}
+        {!isFirstUser && (
+          <p
+            className="text-center"
+            style={{
+              marginTop: 22, fontSize: 12, lineHeight: 1.6,
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            {t('auth.askYourAdmin')}
+          </p>
+        )}
       </div>
     </div>
   );

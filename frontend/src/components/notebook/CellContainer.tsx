@@ -1,4 +1,4 @@
-import { GripVertical, Trash2, Play, Square, Wand2, SkipForward, ArrowDownToLine, ChevronDown, ChevronRight } from 'lucide-react';
+import { Trash2, Play, Square, Wand2, SkipForward, ArrowDownToLine, ChevronRight } from 'lucide-react';
 import { startDrag } from '../../hooks/useCellDrag';
 import { useNotebookStore } from '../../stores/notebookStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -11,7 +11,6 @@ import { executeCommand } from '../../plugins/registry';
 import { outputContextMenu } from '../ContextMenu';
 import { lineDiff } from '../../lib/diff';
 import { CodeCell } from './CodeCell';
-import { CellLanguageSelector } from './CellLanguageSelector';
 import { MarkdownCellComponent } from './MarkdownCell';
 import { CellOutput } from './CellOutput';
 import { useKernelStore } from '../../stores/kernelStore';
@@ -88,52 +87,141 @@ export const CellContainer = memo(function CellContainer({ cell, index }: { cell
     timeLabel = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
   }
 
+  // Forge state model: idle ("Done") / running ("Running …") / stale.
+  // We map our existing cell.status onto these three so the header pill
+  // matches the JSX baseline visually without duplicating state.
+  const ffState: 'idle' | 'running' | 'stale' | 'error' | 'paused' = paused
+    ? 'paused'
+    : running
+      ? 'running'
+      : cell.status === 'stale'
+        ? 'stale'
+        : cell.status === 'error'
+          ? 'error'
+          : 'idle';
+  const stateMeta = {
+    idle:    { label: timeLabel ? `Done · ${timeLabel}` : 'Done',          dot: '#4ade80', color: 'var(--color-text-muted)' },
+    running: { label: timeLabel ? `Running ${timeLabel}` : 'Running…',     dot: '#60a5fa', color: '#60a5fa' },
+    stale:   { label: 'Stale — needs rerun',                                dot: 'var(--color-accent)', color: 'var(--color-accent)' },
+    error:   { label: 'Error',                                              dot: 'var(--color-error)', color: 'var(--color-error)' },
+    paused:  { label: 'Paused at breakpoint',                               dot: 'var(--color-warning)', color: 'var(--color-warning)' },
+  }[ffState];
+  const lang = ((cell.metadata?.language as string | undefined)
+    ?? availableSpecs.find(sp => sp.name === currentSpec)?.language
+    ?? 'python').toLowerCase();
+  const execLabel = cell.execution_count != null
+    ? String(cell.execution_count)
+    : busy ? '*' : '·';
+
   return (
+    <div className="cell-animate" style={{ marginBottom: 14 }}>
     <div
       data-cell-active={active && !appMode ? 'true' : undefined}
-      className={`group relative mb-0.5 rounded-lg border transition-colors cell-animate ${
-        paused ? 'border-warning/40 shadow-sm'
-        : busy ? 'cell-running-border'
-        : (active && !appMode) ? 'border-cell-active/40 shadow-sm'
-        : 'border-transparent hover:border-border'
-      } ${appMode ? 'border-none shadow-none' : ''}`}
+      className={`group relative transition-colors ${
+        busy ? 'cell-running-border' : ''
+      }`}
+      style={{
+        background: appMode ? 'transparent' : 'var(--color-bg-secondary)',
+        border: appMode
+          ? 'none'
+          : `1px solid ${
+              paused ? 'rgba(251,191,36,0.40)'
+              : (active ? 'var(--color-cell-active)' : 'var(--color-border)')
+            }`,
+        borderRadius: appMode ? 0 : 'var(--radius-lg, 10px)',
+        overflow: 'hidden',
+      }}
       onClick={() => !appMode && setActive(cell.id)}
     >
-      {/* left accent bar */}
+      {/* left accent bar — keeps the at-a-glance state read on the gutter.
+          z-index lifts it above the code area's full-width bg-elevated and
+          the output area's bg, otherwise the bar would only peek through
+          the header padding strip. */}
       {!appMode && (
-        <div className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-full transition-colors ${
+        <div className={`absolute left-0 top-0 bottom-0 w-0.5 z-10 pointer-events-none transition-colors ${
           paused ? 'bg-warning' : busy ? 'bg-cell-running animate-pulse' : active ? 'bg-cell-active' : statusColor(cell.status)
         }`} />
       )}
 
-      {/* drag grip handle */}
-      {!appMode && (
-        <div
-          onMouseDown={e => {
-            e.preventDefault();
-            const label = cell.source.split('\n')[0]?.slice(0, 50) || (cell.cell_type === 'markdown' ? 'Markdown' : 'Code');
-            startDrag(index, label, e.clientY);
-          }}
-          className="absolute left-0.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100
-            cursor-grab text-text-muted/40 hover:text-text-secondary transition-opacity p-0.5"
-        >
-          <GripVertical size={14} />
-        </div>
-      )}
-      <div className={`${appMode ? 'px-0' : 'pl-5 pr-2'}`}>
-        {/* toolbar — hidden for rendered markdown, shown on hover/active for code */}
+      {/* The exec-count chip in the header doubles as the drag handle —
+          dragging by it reorders the cell. We attach the mousedown handler
+          there rather than on a separate grip icon to stop the gutter from
+          looking cluttered. See exec-chip span below. */}
+      <div>
+        {/* Forge header row — exec chip · lang · status pill · actions.
+            Matches JSX `[N] python • Done · 2ms`. The lang label shrinks
+            before the status pill when the cell column is narrow. */}
         {!appMode && (cell.cell_type === 'code' || active) && (
-          <div className="flex items-center h-7 gap-1.5">
-            {busy && (
-              <span className="text-[10px] text-cell-running animate-pulse font-medium">
-                {running ? 'running...' : 'queued'}
+          <div className="flex items-center min-w-0"
+            style={{
+              padding: '6px 8px 6px 12px',
+              gap: 10,
+              overflow: 'hidden',
+              borderBottom: cell.cell_type === 'code'
+                ? '1px solid var(--color-border-subtle)'
+                : 'none',
+            }}>
+            {/* Execution count chip — also the cell drag handle.
+                mousedown anywhere on the chip starts the drag; click still
+                propagates to the parent so selecting the cell works. */}
+            <span
+              onMouseDown={e => {
+                if (appMode) return;
+                e.preventDefault();
+                const label = cell.source.split('\n')[0]?.slice(0, 50)
+                  || (cell.cell_type === 'markdown' ? 'Markdown' : 'Code');
+                startDrag(index, label, e.clientY);
+              }}
+              title="Drag to reorder"
+              style={{
+                minWidth: 26, height: 18, borderRadius: 4,
+                padding: '0 5px',
+                background: 'var(--color-bg-hover)',
+                color: 'var(--color-text-secondary)',
+                fontSize: 10,
+                fontFamily: '"JetBrains Mono", monospace',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+                cursor: 'grab',
+              }}
+            >{execLabel}</span>
+
+            {/* Language label — truncates before the status pill so the
+                primary state read survives narrower columns. */}
+            {cell.cell_type === 'code' && (
+              <span className="font-mono truncate"
+                style={{
+                  fontSize: 11, color: 'var(--color-text-muted)',
+                  minWidth: 0,
+                  flexShrink: 2,
+                }}
+                title={lang}
+              >
+                {lang}
               </span>
             )}
-            {paused && (
-              <span className="text-[10px] text-warning font-medium">paused at breakpoint</span>
-            )}
-            {timeLabel && <span className="text-[10px] text-text-muted">{timeLabel}</span>}
+
+            {/* Status pill — collapses to just the dot when there's no room
+                for the label (very narrow notebook columns). */}
+            <span className="inline-flex items-center min-w-0"
+              style={{ gap: 6, fontSize: 11, color: stateMeta.color, flexShrink: 1 }}
+              title={stateMeta.label}
+            >
+              <span style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: stateMeta.dot,
+                flexShrink: 0,
+                ...(ffState === 'running'
+                  ? { animation: 'cell-running-glow 1.5s ease-in-out infinite' }
+                  : {}),
+              }} />
+              <span className="truncate">{stateMeta.label}</span>
+            </span>
+
             <div className="flex-1" />
+
+            {/* Action buttons — paused-state always visible, running shows
+                interrupt, otherwise hover-revealed cluster. */}
             {paused && (
               <>
                 <CellBtn onClick={() => stepExecution(cell.id)} title="Step (next line)">
@@ -173,28 +261,27 @@ export const CellContainer = memo(function CellContainer({ cell, index }: { cell
         {/* cell body */}
         {cell.cell_type === 'code' ? (
           <div>
-            {!appMode && (
-              <div className={`bg-bg-elevated border border-border ${cell.outputs.length > 0 && !codeCollapsed ? 'rounded-t-lg border-b-0' : 'rounded-lg'}`}>
-                <button
-                  onClick={() => setCodeCollapsed(c => !c)}
-                  className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-muted hover:text-text-secondary w-full text-left"
-                >
-                  {codeCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-                  {codeCollapsed ? `${cell.source.split('\n').length} lines hidden` : 'code'}
-                </button>
-                {!codeCollapsed && <CodeCell cell={cell} index={index} />}
-                {!codeCollapsed && (
-                  <div className="flex justify-end px-2 py-0.5">
-                    <CellLanguageSelector
-                      language={((cell.metadata?.language as string | undefined) ?? availableSpecs.find(sp => sp.name === currentSpec)?.language ?? 'python').toLowerCase()}
-                      onChange={(lang) => {
-                        useNotebookStore.getState().setCellMetadata(cell.id, { language: lang });
-                      }}
-                      availableLanguages={[...new Set(availableSpecs.map(sp => sp.language.toLowerCase()))]}
-                    />
-                  </div>
-                )}
+            {!appMode && !codeCollapsed && (
+              <div style={{ background: 'var(--color-bg-elevated)' }}>
+                <CodeCell cell={cell} index={index} />
               </div>
+            )}
+            {!appMode && codeCollapsed && (
+              // Compact placeholder when the user has collapsed the code via
+              // the More menu. Click to re-expand.
+              <button
+                onClick={() => setCodeCollapsed(false)}
+                className="w-full text-left flex items-center hover:bg-bg-hover transition-colors"
+                style={{
+                  gap: 6, padding: '6px 14px',
+                  background: 'var(--color-bg-elevated)',
+                  fontSize: 11, color: 'var(--color-text-muted)',
+                  border: 'none', cursor: 'pointer',
+                }}
+              >
+                <ChevronRight size={11} />
+                {cell.source.split('\n').length} lines hidden
+              </button>
             )}
             {/* inline diff panel */}
             {!appMode && showDiff && diffView && (
@@ -202,30 +289,37 @@ export const CellContainer = memo(function CellContainer({ cell, index }: { cell
                 onClose={() => useNotebookStore.getState().setDiffView(null)} />
             )}
 
-            {cell.outputs.length > 0 && (
-              <div 
+            {cell.outputs.length > 0 && !outputCollapsed && (
+              <div
                 ref={outputRef}
-                style={{ minHeight: running && minHeight ? minHeight : undefined }}
-                className={`${appMode ? '' : `cell-output-block bg-bg-output rounded-b-lg border border-border border-l-2 border-l-accent/30 ${codeCollapsed ? '' : 'border-t-0'}`} ${running ? 'opacity-50 grayscale-[0.5] transition-opacity duration-500' : 'opacity-100 transition-opacity'}`}
+                style={{
+                  minHeight: running && minHeight ? minHeight : undefined,
+                  background: appMode ? 'transparent' : 'var(--color-bg)',
+                  borderTop: appMode ? 'none' : '1px solid var(--color-border-subtle)',
+                }}
+                className={`${running ? 'opacity-50 grayscale-[0.5] transition-opacity duration-500' : 'opacity-100 transition-opacity'}`}
+                onContextMenu={e => outputContextMenu(e, e.currentTarget as HTMLElement)}
               >
-                {!appMode && (
-                  <button
-                    onClick={() => setOutputCollapsed(c => !c)}
-                    className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-muted hover:text-text-secondary w-full text-left"
-                  >
-                    {outputCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
-                    {outputCollapsed ? `${cell.outputs.length} output${cell.outputs.length > 1 ? 's' : ''} hidden` : 'output'}
-                  </button>
-                )}
-                {!outputCollapsed && (
-                  <div
-                    className={appMode ? '' : 'px-3 pb-1'}
-                    onContextMenu={e => outputContextMenu(e, e.currentTarget as HTMLElement)}
-                  >
-                    {cell.outputs.map((out, i) => <CellOutput key={i} output={out} cellId={cell.id} searchQuery={searchQuery} />)}
-                  </div>
-                )}
+                <div className={appMode ? '' : 'px-3 py-2'}>
+                  {cell.outputs.map((out, i) => <CellOutput key={i} output={out} cellId={cell.id} searchQuery={searchQuery} />)}
+                </div>
               </div>
+            )}
+            {!appMode && cell.outputs.length > 0 && outputCollapsed && (
+              <button
+                onClick={() => setOutputCollapsed(false)}
+                className="w-full text-left flex items-center hover:bg-bg-hover transition-colors"
+                style={{
+                  gap: 6, padding: '6px 14px',
+                  background: 'var(--color-bg)',
+                  borderTop: '1px solid var(--color-border-subtle)',
+                  fontSize: 11, color: 'var(--color-text-muted)',
+                  border: 'none', cursor: 'pointer',
+                }}
+              >
+                <ChevronRight size={11} />
+                {cell.outputs.length} output{cell.outputs.length > 1 ? 's' : ''} hidden
+              </button>
             )}
           </div>
         ) : (
@@ -236,7 +330,10 @@ export const CellContainer = memo(function CellContainer({ cell, index }: { cell
         )}
       </div>
 
-      {/* add cell divider — shows on hover between cells */}
+      </div>
+      {/* Add-cell divider lives in the OUTER wrapper (outside the card's
+          overflow:hidden) so the hover popup pill isn't clipped at the
+          bottom edge of the cell. */}
       {!appMode && <AddCellDivider index={index + 1} />}
     </div>
   );

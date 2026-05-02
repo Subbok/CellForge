@@ -131,6 +131,40 @@ pub fn user_notebook_dir(state: &AppState, headers: &axum::http::HeaderMap) -> s
         .unwrap_or_else(|| state.notebook_dir.clone())
 }
 
+/// Walk a workspace directory once and return `(notebook_count, total_bytes)`.
+/// Skips hidden entries (`.git`, `.cache`) and silently ignores filesystem
+/// errors so a single permission glitch can't fail the whole response.
+pub fn scan_workspace(root: &std::path::Path) -> (usize, u64) {
+    use std::collections::VecDeque;
+    let mut queue: VecDeque<std::path::PathBuf> = VecDeque::new();
+    queue.push_back(root.to_path_buf());
+
+    let mut nb_count = 0usize;
+    let mut total: u64 = 0;
+    while let Some(dir) = queue.pop_front() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with('.') {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                queue.push_back(entry.path());
+            } else if meta.is_file() {
+                total = total.saturating_add(meta.len());
+                if name_str.ends_with(".ipynb") {
+                    nb_count += 1;
+                }
+            }
+        }
+    }
+    (nb_count, total)
+}
+
 pub async fn config(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,

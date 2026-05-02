@@ -16,8 +16,8 @@ export type SidebarTab = 'variables' | 'files' | 'toc' | 'history' | 'dependenci
 
 const LS_KEY = 'cellforge.ui';
 
-/** Default accent — matches the Crisp blue that ships in index.css @theme. */
-export const DEFAULT_ACCENT = '#7a99ff';
+/** Default accent — matches the Forge violet that ships in index.css @theme. */
+export const DEFAULT_ACCENT = '#a78bfa';
 
 function isHexColor(s: unknown): s is string {
   return typeof s === 'string' && /^#[0-9a-fA-F]{6}$/.test(s);
@@ -29,6 +29,7 @@ interface Persisted {
   sidebarSecondaryTab: SidebarTab | null;
   sidebarTab: SidebarTab;
   sidebarOpen: boolean;
+  sidebarSide: 'left' | 'right';
   reactiveEnabled: boolean;
   accentColor: string;
   currentThemeId: string;
@@ -64,6 +65,8 @@ interface UIState {
   sidebarWidth: number;
   /** Fraction of the sidebar column height given to the TOP panel (0..1). */
   sidebarSplitRatio: number;
+  /** Which side of the notebook the sidebar lives on. */
+  sidebarSide: 'left' | 'right';
   theme: 'light' | 'dark';
   /** Accent color as a 6-digit hex string (e.g. "#7a99ff"). Drives
    *  --color-accent, --color-accent-hover, --color-cell-active. */
@@ -101,6 +104,7 @@ interface UIState {
   setSidebarSecondaryTab: (tab: SidebarTab | null) => void;
   setSidebarWidth: (w: number) => void;
   setSidebarSplitRatio: (r: number) => void;
+  setSidebarSide: (s: 'left' | 'right') => void;
   setTheme: (theme: 'light' | 'dark') => void;
   setAccentColor: (c: string) => void;
   setSearchQuery: (q: string) => void;
@@ -128,6 +132,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   sidebarSecondaryTab: persisted.sidebarSecondaryTab ?? null,
   sidebarWidth: Math.max(200, Math.min(800, persisted.sidebarWidth ?? 288)),
   sidebarSplitRatio: Math.max(0.15, Math.min(0.85, persisted.sidebarSplitRatio ?? 0.55)),
+  sidebarSide: persisted.sidebarSide === 'left' ? 'left' : 'right',
   theme: 'dark',
   accentColor: isHexColor(persisted.accentColor) ? persisted.accentColor : DEFAULT_ACCENT,
   searchQuery: '',
@@ -183,6 +188,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ sidebarSplitRatio: Math.max(0.15, Math.min(0.85, r)) });
     persist(get());
   },
+  setSidebarSide: (s) => { set({ sidebarSide: s }); persist(get()); },
   setTheme: (theme) => set({ theme }),
   setAccentColor: (c) => {
     // Only accept 6-digit hex; silently ignore bad input.
@@ -261,6 +267,7 @@ function persist(s: UIState) {
     sidebarSecondaryTab: s.sidebarSecondaryTab,
     sidebarTab: s.sidebarTab,
     sidebarOpen: s.sidebarOpen,
+    sidebarSide: s.sidebarSide,
     reactiveEnabled: s.reactiveEnabled,
     accentColor: s.accentColor,
     currentThemeId: s.currentThemeId,

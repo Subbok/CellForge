@@ -1,28 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- App-themed card background. Matches the notebook palette
-       (#13141b outer, #161823 inner) used across the CellForge UI. -->
-  <rect width="1024" height="1024" rx="192" fill="#13141b"/>
-  <rect x="64" y="64" width="896" height="896" rx="144" fill="#161823"/>
+  <!-- Forge baseline: pure black rounded square. Slight inner card to keep
+       the mark from feeling glued to the corners on dock/launcher renders. -->
+  <rect width="1024" height="1024" rx="192" fill="#000000"/>
+  <rect x="64" y="64" width="896" height="896" rx="144" fill="#0a0a0a"/>
 
-  <!-- Glyph: the CellForge favicon from frontend/public/favicon.svg.
-       Scaled 24× (favicon viewBox is 24×24 → 576px tall inside the card).
-       Centered at x=512, shifted up slightly to leave room for the wordmark. -->
-  <g transform="translate(224, 200) scale(24)"
-     fill="none" stroke="#7a99ff" stroke-width="1.6"
-     stroke-linecap="round" stroke-linejoin="round">
-    <path d="M7 10H6a4 4 0 0 1-4-4 1 1 0 0 1 1-1h4"/>
-    <path d="M7 5a1 1 0 0 1 1-1h13a1 1 0 0 1 1 1 7 7 0 0 1-7 7H8a1 1 0 0 1-1-1z"/>
-    <path d="M9 12v5"/>
-    <path d="M15 12v5"/>
-    <path d="M5 20a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3 1 1 0 0 1-1 1H6a1 1 0 0 1-1-1"/>
+  <!-- Brand mark: square brackets containing one accent-filled cell.
+       Glyph viewBox is 24×24, scaled 26× → 624px tall. Total content
+       (mark + gap + 96px wordmark) ≈ 760px; lifted so the bundle is
+       optically centred around y=512 instead of sitting in the lower
+       half (which read as "logo too low" in OS dock renders). -->
+  <g transform="translate(200, 160) scale(26)" fill="none">
+    <path d="M5 4H2v16h3" stroke="#f4f5f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M19 4h3v16h-3" stroke="#f4f5f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="7" y="9" width="10" height="6" rx="1.5" fill="#a78bfa"/>
   </g>
 
-  <!-- "CellForge" wordmark at the bottom of the card. -->
-  <text x="512" y="900"
+  <!-- Wordmark. Cell in foreground, Forge in accent — Space Grotesk where
+       available, generic fallback for tooling that can't load custom fonts
+       at rasterisation time. -->
+  <text x="512" y="860"
         text-anchor="middle"
-        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-family="'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
         font-size="104"
         font-weight="600"
-        fill="#ebedf2"
-        letter-spacing="2">CellForge</text>
+        letter-spacing="-1.5">
+    <tspan fill="#f4f5f7">Cell</tspan><tspan fill="#a78bfa">Forge</tspan>
+  </text>
 </svg>

@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, Cpu, Share2, Clock, Square, Plus, FolderOpen, Anvil, Settings, Shield, LogOut, Zap, X } from 'lucide-react';
+import { FileText, Plus, FolderOpen } from 'lucide-react';
 import { api } from '../services/api';
+import { BrandMark } from './brand/BrandMark';
 import { langColor } from '../lib/languages';
 import type { Notebook } from '../lib/types';
 
@@ -9,10 +10,11 @@ interface DashboardData {
   username: string;
   display_name: string;
   is_admin: boolean;
-  stats: { recent_notebooks_count: number; running_kernels_count: number; shared_files_count: number };
+  stats: { recent_notebooks_count: number; running_kernels_count: number; shared_files_count: number; online_count: number };
   recent_notebooks: { file_path: string; last_opened: string }[];
-  shared_files: { id: number; from_user: string; file_name: string }[];
+  shared_files: { id: number; from_user: string; file_name: string; shared_at: string }[];
   running_kernels: { id: string; kernel_spec: string; language: string; notebook_path: string | null; status: string; memory_mb: number; started_at: string }[];
+  online_others: string[];
 }
 
 interface KernelInfo {
@@ -22,18 +24,23 @@ interface KernelInfo {
   notebook_path: string | null;
   status: string;
   memory_mb: number;
+  started_at?: string;
 }
 
 interface Props {
   onOpenNotebook: (path: string, nb: Notebook) => void;
   onBrowseFiles: () => void;
-  onSettings: () => void;
-  onAdmin?: () => void;
-  onLogout?: () => void;
 }
 
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  // SQLite CURRENT_TIMESTAMP serialises UTC as "YYYY-MM-DD HH:MM:SS" with no
+  // timezone marker, which JS parses as local time. Force UTC interpretation
+  // by replacing the space with 'T' and appending 'Z' when no offset is
+  // present, otherwise the "X minutes ago" reading is off by the user's
+  // timezone offset.
+  const hasTz = /[zZ]$|[+-]\d\d:?\d\d$/.test(iso);
+  const normalized = hasTz ? iso : iso.replace(' ', 'T') + 'Z';
+  const diff = Date.now() - new Date(normalized).getTime();
   const seconds = Math.floor(diff / 1000);
   if (seconds < 60) return 'just now';
   const minutes = Math.floor(seconds / 60);
@@ -52,14 +59,57 @@ function greetingKey(): string {
   return 'home.goodEvening';
 }
 
-export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdmin, onLogout }: Props) {
+/** Stat card from the 4-card top row. */
+function StatCard({ label, value, sub, dotColor }: {
+  label: string;
+  value: string | number;
+  sub: string;
+  dotColor: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: 16,
+        background: 'var(--color-bg-secondary)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg, 10px)',
+      }}
+    >
+      <div className="flex items-center gap-2 text-text-muted" style={{ fontSize: 12 }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
+        {label}
+      </div>
+      <div className="font-semibold" style={{ fontSize: 28, color: 'var(--color-text)', marginTop: 10, letterSpacing: '-0.02em', lineHeight: 1 }}>
+        {value}
+      </div>
+      <div className="text-text-muted" style={{ fontSize: 11, marginTop: 4 }}>{sub}</div>
+    </div>
+  );
+}
+
+/** A 1.6fr / 1fr panel section header. */
+function PanelHeader({ title, action }: { title: string; action?: React.ReactNode }) {
+  return (
+    <header
+      className="flex items-center justify-between"
+      style={{
+        padding: '14px 18px',
+        borderBottom: '1px solid var(--color-border-subtle)',
+      }}
+    >
+      <div style={{ fontSize: 14, color: 'var(--color-text)', fontWeight: 600 }}>{title}</div>
+      {action}
+    </header>
+  );
+}
+
+export function HomeDashboard({ onOpenNotebook, onBrowseFiles }: Props) {
   const { t } = useTranslation();
   const [data, setData] = useState<DashboardData | null>(null);
   const [kernels, setKernels] = useState<KernelInfo[]>([]);
+  const [events, setEvents] = useState<{ id: number; ts: string; actor: string; kind: string; target: string; meta: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const loadDashboard = useCallback(async () => {
@@ -69,6 +119,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
       setKernels(d.running_kernels.map(k => ({
         id: k.id, kernel_spec: k.kernel_spec, language: k.language,
         notebook_path: k.notebook_path, status: k.status, memory_mb: k.memory_mb,
+        started_at: k.started_at,
       })));
       setError('');
     } catch (e: unknown) {
@@ -79,40 +130,122 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
   }, []);
 
   const pollKernels = useCallback(async () => {
-    try { setKernels(await api.getDashboardKernels()); } catch { /* ignored */ }
+    try {
+      const ks = await api.getDashboardKernels();
+      setKernels(ks);
+    } catch { /* ignored */ }
+  }, []);
+
+  const loadActivity = useCallback(async () => {
+    try { setEvents(await api.getActivity()); }
+    catch { /* feed is optional, don't propagate */ }
   }, []);
 
   useEffect(() => {
     loadDashboard();
-    pollRef.current = setInterval(pollKernels, 5000);
+    loadActivity();
+    pollRef.current = setInterval(() => {
+      pollKernels();
+      loadActivity();
+    }, 5000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [loadDashboard, pollKernels]);
-
-  // close user menu on outside click
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowUserMenu(false);
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const stopKernel = useCallback(async (id: string) => {
-    try { await api.stopKernel(id); await pollKernels(); await loadDashboard(); }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
-  }, [pollKernels, loadDashboard]);
+  }, [loadDashboard, loadActivity, pollKernels]);
 
   async function openRecent(path: string) {
     try { const nb = await api.getNotebook(path); onOpenNotebook(path, nb); }
     catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
   }
 
+  async function newNotebook() {
+    try {
+      const res = await api.createNotebook();
+      const nb = await api.getNotebook(res.path);
+      onOpenNotebook(res.path, nb);
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
+  }
+
+  // Activity feed: prefer the real backend `activity_events` stream — it
+  // already encodes who-did-what across share / open / kernel-start /
+  // create-user. Falls back to a synthesised view derived from
+  // `recent_notebooks + kernels.started_at + shared_files.shared_at` so a
+  // brand-new workspace (no events logged yet) still has something useful.
+  interface Evt { kind: 'opened' | 'kernel' | 'shared' | 'created_user'; when: string; what: string; lang?: string; from?: string; selfActor: boolean }
+  const myUsername = data?.username ?? '';
+  const activity = useMemo(() => {
+    if (events.length > 0) {
+      return events
+        .map(e => {
+          const selfActor = e.actor === myUsername;
+          if (e.kind === 'shared') {
+            // The backend records shares as actor=sharer, target=recipient,
+            // meta=file_name. Display flips depending on viewer.
+            return {
+              kind: 'shared' as const,
+              when: e.ts,
+              what: e.meta || e.target,
+              from: selfActor ? e.target : e.actor,
+              selfActor,
+            };
+          }
+          if (e.kind === 'kernel_started') {
+            return {
+              kind: 'kernel' as const,
+              when: e.ts,
+              what: e.target.split('/').pop() ?? e.target,
+              lang: e.meta,
+              selfActor,
+            };
+          }
+          if (e.kind === 'created_user') {
+            return {
+              kind: 'created_user' as const,
+              when: e.ts,
+              what: e.target,
+              selfActor,
+            };
+          }
+          // default: 'opened'
+          return {
+            kind: 'opened' as const,
+            when: e.ts,
+            what: e.target.split('/').pop() ?? e.target,
+            selfActor,
+          };
+        })
+        .slice(0, 8);
+    }
+    // Fallback synthesis (workspace with no logged events yet).
+    const out: Evt[] = [];
+    for (const r of data?.recent_notebooks ?? []) {
+      out.push({ kind: 'opened', when: r.last_opened, what: r.file_path?.split('/').pop() ?? 'Untitled', selfActor: true });
+    }
+    for (const k of kernels) {
+      if (k.started_at) {
+        out.push({
+          kind: 'kernel', when: k.started_at,
+          what: k.notebook_path?.split('/').pop() ?? k.kernel_spec,
+          lang: k.language, selfActor: true,
+        });
+      }
+    }
+    for (const s of data?.shared_files ?? []) {
+      if (s.shared_at) {
+        out.push({ kind: 'shared', when: s.shared_at, what: s.file_name, from: s.from_user, selfActor: false });
+      }
+    }
+    const ts = (iso: string) => {
+      const hasTz = /[zZ]$|[+-]\d\d:?\d\d$/.test(iso);
+      return new Date(hasTz ? iso : iso.replace(' ', 'T') + 'Z').getTime();
+    };
+    return out.sort((a, b) => ts(b.when) - ts(a.when)).slice(0, 6);
+  }, [events, data, kernels, myUsername]);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
+      <div className="h-full bg-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-accent/10 flex items-center justify-center">
-            <Anvil size={22} className="text-accent animate-pulse" />
+          <div className="text-accent animate-pulse">
+            <BrandMark size={28} />
           </div>
           <span className="text-sm text-text-muted">{t('home.loadingWorkspace')}</span>
         </div>
@@ -120,258 +253,301 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles, onSettings, onAdm
     );
   }
 
-  const stats = data?.stats ?? { recent_notebooks_count: 0, running_kernels_count: 0, shared_files_count: 0 };
+  const recent = (data?.recent_notebooks ?? []).slice(0, 6);
+  const sharedCount = data?.shared_files.length ?? 0;
+  const totalMem = kernels.reduce((acc, k) => acc + (k.memory_mb || 0), 0);
+  const langs = Array.from(new Set(kernels.map(k => k.language).filter(Boolean)));
+  const sharers = new Set((data?.shared_files ?? []).map(s => s.from_user));
   const displayName = data?.display_name || data?.username || 'user';
-  const initials = displayName.slice(0, 2).toUpperCase();
+  // Map filename → owner username for the shared-from chip on Recent rows.
+  const sharedBy = new Map((data?.shared_files ?? []).map(s => [s.file_name, s.from_user]));
 
   return (
-    <div className="min-h-screen bg-bg relative overflow-auto">
-      {/* Ambient glow */}
-      <div className="absolute inset-0 pointer-events-none"
-        style={{ background: 'radial-gradient(ellipse 800px 400px at 50% 0%, rgba(122,153,255,0.06), transparent)' }} />
-
-      {/* Header */}
-      <header className="sticky top-0 z-20 border-b border-border/60 bg-bg/80 backdrop-blur-xl">
-        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-accent/10 flex items-center justify-center">
-              <Anvil size={18} className="text-accent" />
+    <div className="h-full overflow-auto" style={{ background: 'var(--color-bg)', zoom: 1.15 }}>
+      <div className="max-w-[1100px] mx-auto" style={{ padding: '32px 32px 48px' }}>
+        {/* Greeting + actions */}
+        <div className="flex items-end justify-between" style={{ marginBottom: 28 }}>
+          <div>
+            <div className="font-semibold" style={{ fontSize: 30, color: 'var(--color-text)', letterSpacing: '-0.025em' }}>
+              {t(greetingKey())}, {displayName}
             </div>
-            <span className="font-semibold text-text text-sm tracking-tight">CellForge</span>
-          </div>
-          <div className="flex items-center gap-1" ref={menuRef}>
-            {/* User avatar / menu */}
-            <div className="relative ml-1">
-              <button
-                onClick={() => setShowUserMenu(v => !v)}
-                className="w-8 h-8 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center hover:bg-accent/25 transition-colors"
-                title={displayName}
-              >
-                {initials}
-              </button>
-              {showUserMenu && (
-                <div className="absolute right-0 top-full mt-1 bg-bg-secondary border border-border rounded-xl shadow-2xl shadow-black/40 py-1 w-44 z-50">
-                  <div className="px-3 py-2 border-b border-border">
-                    <p className="text-sm font-medium text-text truncate">{displayName}</p>
-                    <p className="text-[11px] text-text-muted">@{data?.username}</p>
-                  </div>
-                  <button onClick={() => { setShowUserMenu(false); onSettings(); }}
-                    className="w-full text-left px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover flex items-center gap-2">
-                    <Settings size={14} /> {t('common.settings')}
-                  </button>
-                  {onAdmin && (
-                    <button onClick={() => { setShowUserMenu(false); onAdmin(); }}
-                      className="w-full text-left px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover flex items-center gap-2">
-                      <Shield size={14} /> {t('home.adminPanel')}
-                    </button>
-                  )}
-                  {onLogout && (
-                    <button onClick={() => { setShowUserMenu(false); onLogout(); }}
-                      className="w-full text-left px-3 py-2 text-sm text-error hover:bg-error/10 flex items-center gap-2">
-                      <LogOut size={14} /> {t('home.signOut')}
-                    </button>
-                  )}
-                </div>
+            <div className="text-text-muted" style={{ fontSize: 14, marginTop: 4 }}>
+              {kernels.length} {kernels.length === 1 ? 'kernel' : 'kernels'} running
+              {data && data.stats.online_count > 1 && (
+                <> · {data.stats.online_count - 1} {data.stats.online_count - 1 === 1 ? 'collaborator' : 'collaborators'} online</>
+              )}
+              {recent[0] && (
+                <> · last opened {timeAgo(recent[0].last_opened)}</>
               )}
             </div>
           </div>
-        </div>
-      </header>
-
-      <div className="relative max-w-5xl mx-auto px-6 py-8 space-y-8">
-        {/* Greeting */}
-        <div>
-          <h1 className="text-2xl font-bold text-text tracking-tight">
-            {t(greetingKey())}, {displayName}
-          </h1>
-          <p className="text-sm text-text-muted mt-1">{t('home.workspaceSubtitle')}</p>
+          <div className="flex" style={{ gap: 8 }}>
+            <button
+              onClick={onBrowseFiles}
+              style={{
+                padding: '8px 14px',
+                background: 'var(--color-bg-elevated)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 8,
+                color: 'var(--color-text)',
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              {t('home.openFile')}
+            </button>
+            <button
+              onClick={newNotebook}
+              style={{
+                padding: '8px 14px',
+                background: 'var(--color-accent)',
+                border: 'none',
+                borderRadius: 8,
+                color: 'var(--color-accent-fg)',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              + {t('home.newNotebook')}
+            </button>
+          </div>
         </div>
 
         {error && (
-          <div className="px-4 py-2.5 bg-error/10 border border-error/20 text-error text-xs rounded-xl">{error}</div>
+          <div className="text-[12px] rounded-lg" style={{
+            marginBottom: 16, padding: '8px 12px',
+            background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.20)',
+            color: 'var(--color-error)',
+          }}>
+            {error}
+          </div>
         )}
 
-        {/* Stats cards */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="group bg-bg-secondary/60 border border-border/50 rounded-2xl p-5 hover:border-accent/30 transition-all duration-300 cursor-default">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-9 h-9 rounded-xl bg-accent/10 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
-                <FileText size={18} className="text-accent" />
+        {/* 4-stat grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: 12, marginBottom: 28 }}>
+          <StatCard
+            label={t('home.statActiveKernels')}
+            value={kernels.length}
+            sub={langs.length > 0 ? langs.slice(0, 3).join(', ') : '—'}
+            dotColor="var(--color-success)"
+          />
+          <StatCard
+            label={t('home.statMemoryInUse')}
+            value={totalMem >= 1024 ? `${(totalMem / 1024).toFixed(1)} GB` : `${totalMem} MB`}
+            sub={t('home.memOfKernels', { count: kernels.length })}
+            dotColor="var(--color-accent)"
+          />
+          <StatCard
+            label={t('home.statNotebooks')}
+            value={data?.stats.recent_notebooks_count ?? 0}
+            sub={t('home.sharedSub', { count: sharedCount })}
+            dotColor="var(--color-info)"
+          />
+          <StatCard
+            label={t('home.statSharedWithMe')}
+            value={sharedCount}
+            sub={t('home.fromPeople', { count: sharers.size })}
+            dotColor="#a78bfa"
+          />
+        </div>
+
+        {/* 2-column: Recent (1.6fr) + Activity (1fr) */}
+        <div className="grid" style={{ gridTemplateColumns: '1.6fr 1fr', gap: 20 }}>
+          {/* Recent notebooks */}
+          <section
+            className="overflow-hidden"
+            style={{
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg, 10px)',
+            }}
+          >
+            <PanelHeader
+              title={t('home.recentNotebooks')}
+              action={recent.length > 0 ? (
+                <button onClick={onBrowseFiles}
+                  className="text-text-muted hover:text-text"
+                  style={{ fontSize: 12, cursor: 'pointer' }}>
+                  {t('home.viewAll')} →
+                </button>
+              ) : undefined}
+            />
+            {recent.length === 0 ? (
+              <div className="text-center" style={{ padding: '40px 18px' }}>
+                <FileText size={20} className="mx-auto mb-2 text-text-muted/40" />
+                <p className="text-[13px] text-text-muted">{t('home.noRecent')}</p>
+                <button onClick={newNotebook}
+                  className="mt-3"
+                  style={{
+                    padding: '6px 12px', borderRadius: 8,
+                    background: 'var(--color-accent)', color: 'var(--color-accent-fg)',
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+                  }}>
+                  + {t('home.newNotebook')}
+                </button>
               </div>
-            </div>
-            <p className="text-2xl font-bold text-text">{stats.recent_notebooks_count}</p>
-            <p className="text-xs text-text-muted mt-0.5">{t('home.recentNotebooks')}</p>
-          </div>
-          <div className="group bg-bg-secondary/60 border border-border/50 rounded-2xl p-5 hover:border-success/30 transition-all duration-300 cursor-default">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-9 h-9 rounded-xl bg-success/10 flex items-center justify-center group-hover:bg-success/15 transition-colors">
-                <Zap size={18} className="text-success" />
-              </div>
-              {kernels.length > 0 && (
-                <span className="flex items-center gap-1.5 text-[11px] text-success font-medium">
+            ) : (
+              recent.map((r, i) => {
+                const fname = r.file_path?.split('/').pop() ?? 'Untitled';
+                const folder = r.file_path?.includes('/') ? r.file_path.slice(0, r.file_path.lastIndexOf('/')) : '';
+                const ext = fname.split('.').pop() ?? '';
+                const owner = sharedBy.get(fname);
+                return (
+                  <button
+                    key={r.file_path}
+                    onClick={() => openRecent(r.file_path)}
+                    className="w-full text-left hover:bg-bg-hover transition-colors"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '36px 1fr 140px 100px',
+                      padding: '12px 18px',
+                      alignItems: 'center',
+                      borderTop: i ? '1px solid var(--color-border-subtle)' : 'none',
+                      cursor: 'pointer',
+                      background: 'transparent',
+                      border: 'none',
+                    }}
+                  >
+                    <div style={{
+                      width: 28, height: 28, borderRadius: 6,
+                      background: owner ? 'rgba(167,139,250,0.12)' : 'var(--color-bg-hover)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11,
+                      color: owner ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                    }}>
+                      <FileText size={13} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate flex items-center gap-1.5" style={{ fontSize: 13, color: 'var(--color-text)' }}>
+                        <span className="truncate">{fname}</span>
+                        {owner && (
+                          <span style={{
+                            padding: '1px 6px', borderRadius: 4,
+                            background: 'color-mix(in srgb, var(--color-accent) 12%, transparent)',
+                            color: 'var(--color-accent)',
+                            fontSize: 10, fontWeight: 500,
+                            flexShrink: 0,
+                          }}>
+                            @{owner}
+                          </span>
+                        )}
+                      </div>
+                      {folder && (
+                        <div className="truncate" style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{folder}</div>
+                      )}
+                    </div>
+                    <div>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 4,
+                        background: 'var(--color-bg-hover)',
+                        fontSize: 11, color: 'var(--color-text-secondary)',
+                      }}>{ext || 'file'}</span>
+                    </div>
+                    <div className="text-right text-text-muted" style={{ fontSize: 11 }}>{timeAgo(r.last_opened)}</div>
+                  </button>
+                );
+              })
+            )}
+          </section>
+
+          {/* Activity */}
+          <section
+            className="overflow-hidden"
+            style={{
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg, 10px)',
+            }}
+          >
+            <PanelHeader
+              title={t('home.activity')}
+              action={kernels.length > 0 ? (
+                <span className="flex items-center gap-1.5" style={{ fontSize: 11 }}>
                   <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                  {t('home.live')}
+                  <span className="text-success font-medium">{kernels.length} {t('home.live')}</span>
                 </span>
+              ) : undefined}
+            />
+            <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {activity.length === 0 ? (
+                <p className="text-[12px] text-text-muted text-center" style={{ padding: '24px 0' }}>
+                  {t('home.noActivity')}
+                </p>
+              ) : (
+                activity.map((evt, i) => {
+                  const color = evt.kind === 'kernel'
+                    ? langColor(evt.lang ?? '')
+                    : evt.kind === 'shared'
+                      ? 'var(--color-warning)'
+                      : 'var(--color-accent)';
+                  // Avatar identifies the actor: incoming shares show the
+                  // sharer; everything else (including outgoing shares the
+                  // viewer initiated) uses the viewer's initial.
+                  const subjectName = (evt.kind === 'shared' && !evt.selfActor)
+                    ? (evt.from ?? '?')
+                    : (displayName || 'Y');
+                  const initial = subjectName.slice(0, 1).toUpperCase();
+                  const action =
+                    evt.kind === 'opened' ? t('home.evtOpened')
+                      : evt.kind === 'kernel' ? t('home.evtKernelStarted')
+                        : evt.kind === 'created_user' ? t('home.evtCreatedUser')
+                          : evt.selfActor ? t('home.evtSharedWith')
+                            : t('home.evtSharedWithYou');
+                  // Outgoing shares display the recipient's @username;
+                  // incoming ones display the file name. created_user shows
+                  // the new account's @username.
+                  const targetLabel = evt.kind === 'shared' && evt.selfActor
+                    ? `@${evt.from ?? evt.what}`
+                    : evt.kind === 'created_user'
+                      ? `@${evt.what}`
+                      : evt.what;
+                  // Subject text: "You" for self-actor events; "@actor" for
+                  // events someone else triggered (incoming shares).
+                  const subjectLabel = (evt.kind === 'shared' && !evt.selfActor)
+                    ? `@${evt.from ?? '?'}`
+                    : t('home.you');
+                  return (
+                    <div key={i} className="flex items-start" style={{ gap: 10 }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: '50%',
+                        background: color, color: '#1a1815',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, fontWeight: 600,
+                        flexShrink: 0,
+                      }}>
+                        {initial}
+                      </div>
+                      <div className="flex-1 min-w-0" style={{ fontSize: 12 }}>
+                        <span style={{ color: 'var(--color-text)' }}>{subjectLabel}</span>
+                        <span style={{ color: 'var(--color-text-muted)' }}> {action} </span>
+                        <span style={{ color: 'var(--color-accent)' }}>{targetLabel}</span>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 1 }}>
+                          {timeAgo(evt.when)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
-            <p className="text-2xl font-bold text-text">{kernels.length}</p>
-            <p className="text-xs text-text-muted mt-0.5">{t('home.runningKernels')}</p>
-          </div>
-          <div className="group bg-bg-secondary/60 border border-border/50 rounded-2xl p-5 hover:border-warning/30 transition-all duration-300 cursor-default">
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-9 h-9 rounded-xl bg-warning/10 flex items-center justify-center group-hover:bg-warning/15 transition-colors">
-                <Share2 size={18} className="text-warning" />
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-text">{stats.shared_files_count}</p>
-            <p className="text-xs text-text-muted mt-0.5">{t('home.sharedWithMe')}</p>
-          </div>
+          </section>
         </div>
 
-        {/* Quick actions */}
-        <div className="flex items-center gap-3">
-          <button onClick={onBrowseFiles}
-            className="btn btn-md btn-secondary gap-2 rounded-xl hover:border-border transition-all">
-            <FolderOpen size={15} /> {t('home.browseFiles')}
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const res = await api.createNotebook();
-                const nb = await api.getNotebook(res.path);
-                onOpenNotebook(res.path, nb);
-              } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
-            }}
-            className="btn btn-md btn-primary gap-2 rounded-xl shadow-lg shadow-accent/15 hover:shadow-accent/25 active:scale-[0.98] transition-all">
-            <Plus size={15} /> {t('home.newNotebook')}
-          </button>
-        </div>
-
-        {/* Recent notebooks */}
-        {data && data.recent_notebooks.length > 0 && (
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{t('home.recentNotebooks')}</h2>
-              <button onClick={onBrowseFiles} className="text-xs text-accent hover:text-accent-hover transition-colors">
-                {t('home.viewAll')}
-              </button>
-            </div>
-            <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
-              {data.recent_notebooks.map(n => (
-                <button
-                  key={n.file_path}
-                  onClick={() => openRecent(n.file_path)}
-                  className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-bg-hover/50 transition-all text-left group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-accent/8 flex items-center justify-center group-hover:bg-accent/12 transition-colors">
-                    <FileText size={15} className="text-accent" />
-                  </div>
-                  <span className="text-sm text-text flex-1 truncate font-medium">
-                    {n.file_path?.split('/').pop() ?? 'Untitled'}
-                  </span>
-                  <span className="text-[11px] text-text-muted shrink-0 flex items-center gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
-                    <Clock size={11} /> {timeAgo(n.last_opened)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Shared with me */}
-        {data && data.shared_files.length > 0 && (
-          <section>
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">{t('home.sharedWithMe')}</h2>
-            <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
-              {data.shared_files.map((s, i) => (
-                <div key={`${s.from_user}-${s.file_name}-${i}`}
-                  className="flex items-center gap-3 px-5 py-3.5 hover:bg-bg-hover/50 transition-all group">
-                  <button
-                    onClick={() => s.file_name.endsWith('.ipynb') ? openRecent(s.file_name) : undefined}
-                    className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                    <div className="w-8 h-8 rounded-lg bg-warning/8 flex items-center justify-center group-hover:bg-warning/12 transition-colors">
-                      <Share2 size={15} className="text-warning" />
-                    </div>
-                    <span className="text-sm text-text flex-1 truncate font-medium">{s.file_name}</span>
-                    <span className="text-[11px] text-text-muted">{t('home.fromUser', { username: s.from_user })}</span>
-                  </button>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await api.unshareFile(s.id).catch(() => {});
-                      loadDashboard();
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-all"
-                    title={t('home.removeShare')}
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Running kernels */}
-        {kernels.length > 0 && (
-          <section>
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">{t('home.runningKernels')}</h2>
-            <div className="bg-bg-secondary/40 border border-border/40 rounded-2xl overflow-hidden divide-y divide-border/30">
-              {kernels.map(k => {
-                const color = langColor(k.language ?? '');
-                return (
-                  <div key={k.id} className="flex items-center gap-3 px-5 py-3.5 group">
-                    <div className="relative">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                        style={{ backgroundColor: `${color}12` }}>
-                        <Cpu size={15} style={{ color }} />
-                      </div>
-                      <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-bg-secondary ${k.status === 'busy' ? 'bg-warning animate-pulse' : 'bg-success'}`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm text-text block truncate font-medium">
-                        {k.notebook_path?.split('/').pop() ?? k.kernel_spec}
-                      </span>
-                      <div className="flex items-center gap-2 text-[11px] text-text-muted">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                          style={{ backgroundColor: `${color}15`, color }}>
-                          {k.language}
-                        </span>
-                        <span>{k.status}</span>
-                        <span>{k.memory_mb > 0 ? `${k.memory_mb} MB` : ''}</span>
-                      </div>
-                    </div>
-                    <button onClick={() => stopKernel(k.id)}
-                      className="opacity-0 group-hover:opacity-100 btn btn-sm btn-ghost text-error hover:bg-error/10 transition-all"
-                      title={t('home.stopKernel')}>
-                      <Square size={13} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* Empty state */}
-        {data && data.recent_notebooks.length === 0 && kernels.length === 0 && (
-          <div className="text-center py-16">
-            <div className="w-16 h-16 rounded-2xl bg-accent/8 flex items-center justify-center mx-auto mb-4">
-              <Anvil size={32} className="text-accent/40" />
-            </div>
-            <p className="text-text-secondary font-medium">{t('home.workspaceEmpty')}</p>
-            <p className="text-sm text-text-muted mt-1">{t('home.createToStart')}</p>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await api.createNotebook();
-                  const nb = await api.getNotebook(res.path);
-                  onOpenNotebook(res.path, nb);
-                } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
-              }}
-              className="btn btn-md btn-primary gap-2 rounded-xl mt-4 shadow-lg shadow-accent/15">
-              <Plus size={15} /> {t('home.createNotebook')}
+        {/* Empty workspace nudge if there's truly nothing */}
+        {recent.length === 0 && kernels.length === 0 && (
+          <div className="text-center" style={{ marginTop: 32 }}>
+            <button onClick={onBrowseFiles}
+              className="inline-flex items-center gap-2 text-text-muted hover:text-text"
+              style={{ fontSize: 13 }}>
+              <FolderOpen size={14} />
+              {t('home.browseFiles')}
             </button>
+            <span className="mx-2 text-text-muted/40">·</span>
+            <span className="inline-flex items-center gap-1 text-text-muted" style={{ fontSize: 13 }}>
+              <Plus size={14} />
+              {t('home.createToStart')}
+            </span>
           </div>
         )}
       </div>

@@ -10,7 +10,7 @@ export function Notebook() {
   useNotebookKeys();
 
   return (
-    <div data-notebook-root className="max-w-5xl mx-auto py-6 px-6 relative bg-bg min-h-full my-1">
+    <div data-notebook-root className="max-w-5xl mx-auto py-4 px-3 sm:px-5 relative bg-bg min-h-full my-1">
       {cells.map((cell, index) => (
         <div key={cell.id} data-cell-idx={index} data-cell-id={cell.id}>
           {/* drop indicator line */}
