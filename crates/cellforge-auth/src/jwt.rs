@@ -34,7 +34,7 @@ fn secret() -> &'static [u8] {
         }
 
         let mut key = vec![0u8; 64];
-        getrandom::getrandom(&mut key).expect("getrandom failed — system entropy pool unavailable");
+        getrandom::fill(&mut key).expect("getrandom failed — system entropy pool unavailable");
         let _ = std::fs::create_dir_all(&dir);
         if let Err(e) = std::fs::write(&key_path, &key) {
             tracing::error!(
