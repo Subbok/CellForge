@@ -203,7 +203,16 @@ impl<'a> Analyzer<'a> {
             "global_statement" => {
                 // All identifiers in this statement are marked as global definitions
                 for i in 0..node.child_count() {
-                    let child = node.child(i).unwrap();
+                    let child = {
+                        // tree-sitter 0.26 changed `Node::child` to take `u32`
+                        // instead of `usize`. The conversion is a no-op on 0.25
+                        // (and triggers clippy::useless_conversion there) but
+                        // keeps the call site forward-compatible across the
+                        // dependabot bump.
+                        #[allow(clippy::useless_conversion)]
+                        let idx = i.try_into().unwrap();
+                        node.child(idx).unwrap()
+                    };
                     if child.kind() == "identifier"
                         && let Ok(name) = child.utf8_text(self.src)
                     {
@@ -247,7 +256,16 @@ impl<'a> Analyzer<'a> {
             "pattern_list" | "tuple_pattern" | "tuple" | "parameters" | "default_parameter"
             | "typed_parameter" => {
                 for i in 0..node.child_count() {
-                    self.collect_defs(node.child(i).unwrap());
+                    self.collect_defs({
+                        // tree-sitter 0.26 changed `Node::child` to take `u32`
+                        // instead of `usize`. The conversion is a no-op on 0.25
+                        // (and triggers clippy::useless_conversion there) but
+                        // keeps the call site forward-compatible across the
+                        // dependabot bump.
+                        #[allow(clippy::useless_conversion)]
+                        let idx = i.try_into().unwrap();
+                        node.child(idx).unwrap()
+                    });
                 }
             }
             "list_splat_pattern" | "dictionary_splat_pattern" => {
@@ -294,7 +312,16 @@ impl<'a> Analyzer<'a> {
 
     fn collect_import_defs(&mut self, node: Node) {
         for i in 0..node.child_count() {
-            let child = node.child(i).unwrap();
+            let child = {
+                // tree-sitter 0.26 changed `Node::child` to take `u32`
+                // instead of `usize`. The conversion is a no-op on 0.25
+                // (and triggers clippy::useless_conversion there) but
+                // keeps the call site forward-compatible across the
+                // dependabot bump.
+                #[allow(clippy::useless_conversion)]
+                let idx = i.try_into().unwrap();
+                node.child(idx).unwrap()
+            };
             match child.kind() {
                 "dotted_name" => {
                     // import os.path -> we take the first part as the bound name
