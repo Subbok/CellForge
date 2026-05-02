@@ -59,9 +59,10 @@ pub struct EnrichedUser {
     kernel_count: usize,
     /// Number of `.ipynb` files anywhere under the user's workspace dir.
     notebook_count: usize,
-    /// Total bytes consumed by everything under the workspace dir (notebooks
-    /// + uploaded files + folders). Hidden entries (`.git`, `.cache`) are
-    /// excluded so checkouts of repos with bulky `.git` dirs don't dominate.
+    /// Total bytes consumed by everything under the workspace dir
+    /// (notebooks, uploaded files, folders). Hidden entries (`.git`,
+    /// `.cache`) are excluded so checkouts of repos with bulky `.git`
+    /// dirs don't dominate.
     storage_bytes: u64,
 }
 

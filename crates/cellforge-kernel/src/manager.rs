@@ -327,10 +327,10 @@ fn tree_cpu_pct(sys: &sysinfo::System, root: sysinfo::Pid) -> f32 {
         if !visited.insert(pid) {
             continue;
         }
-        if let Some(p) = sys.process(pid) {
-            if p.thread_kind().is_none() {
-                total += p.cpu_usage();
-            }
+        if let Some(p) = sys.process(pid)
+            && p.thread_kind().is_none()
+        {
+            total += p.cpu_usage();
         }
         for (child_pid, child_proc) in sys.processes() {
             if child_proc.parent() == Some(pid) && !visited.contains(child_pid) {
