@@ -74,9 +74,12 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Reset state on each open
+  // Reset state on each open. Synchronous setState in this effect is the
+  // intended pattern: every fresh palette open should land on a clean
+  // query + active index without keeping the previous session's filter.
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery('');
       setActiveIdx(0);
       // focus next tick so the autoFocus fires after portal mount
@@ -189,8 +192,12 @@ export function CommandPalette({
     });
   }, [allItems, query]);
 
-  // Clamp active index when items change
+  // Clamp active index when items change — without this a filter that
+  // shrinks the list would leave activeIdx pointing past the end and ↵
+  // would do nothing. Synchronous setState in the effect is intentional:
+  // there's no external system to subscribe to, just a derived index.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveIdx(i => Math.max(0, Math.min(i, items.length - 1)));
   }, [items.length]);
 

@@ -177,7 +177,10 @@ pub async fn register(
     } else {
         extract_user(&headers).unwrap_or_default()
     };
-    match state.users.register(&req.username, &req.password, &display, &created_by) {
+    match state
+        .users
+        .register(&req.username, &req.password, &display, &created_by)
+    {
         Ok(user) => {
             if is_first {
                 // first user = self-registration, log them in

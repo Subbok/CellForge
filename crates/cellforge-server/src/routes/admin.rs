@@ -93,7 +93,6 @@ pub async fn list_users(
     Ok(Json(enriched))
 }
 
-
 #[derive(Deserialize)]
 pub struct CreateUserReq {
     username: String,
@@ -193,7 +192,13 @@ pub async fn update_user(
 
     state
         .users
-        .update_user_limits(&username, max_kernels, max_memory_mb, &group_name, max_storage_mb)
+        .update_user_limits(
+            &username,
+            max_kernels,
+            max_memory_mb,
+            &group_name,
+            max_storage_mb,
+        )
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
     // Handle is_active toggle — both directions now work.
@@ -226,7 +231,11 @@ pub async fn update_user(
             .users
             .set_admin(&username, want_admin)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let action = if want_admin { "promoted_admin" } else { "demoted_admin" };
+        let action = if want_admin {
+            "promoted_admin"
+        } else {
+            "demoted_admin"
+        };
         state
             .users
             .record_activity(&caller.username, action, &username, "");

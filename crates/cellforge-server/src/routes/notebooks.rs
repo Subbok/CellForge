@@ -46,7 +46,8 @@ pub async fn read(
         tracing::error!("reading {path}: {e}");
         StatusCode::NOT_FOUND
     });
-    if result.is_ok() && path.ends_with(".ipynb")
+    if result.is_ok()
+        && path.ends_with(".ipynb")
         && let Some(actor) = crate::routes::auth::extract_user(&headers)
     {
         // Activity feed: log the open so the Home column has something to
