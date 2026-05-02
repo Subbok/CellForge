@@ -14,8 +14,8 @@ tracing = { workspace = true }
 
 zeromq = "0.5"
 bytes = "1"
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 hex = "0.4"
 futures = "0.3"
 cellforge-config = { path = "../cellforge-config" }
@@ -24,4 +24,4 @@ libc = "0.2"
 # Cross-platform process memory sampling for the admin panel. Default features
 # include only the pieces we use (process enumeration + per-process RSS), so
 # no disk/network/CPU collectors get dragged in.
-sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
