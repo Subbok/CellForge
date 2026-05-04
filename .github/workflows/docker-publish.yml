@@ -48,7 +48,7 @@ jobs:
       docker_tag: ${{ steps.resolve.outputs.docker_tag }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Zwolnienie miejsca na runnerze — GHA ma ~14 GB, multi-arch buildx
       # + uv cache potrafi to zjeść.
@@ -154,7 +154,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Free disk space
         run: |
