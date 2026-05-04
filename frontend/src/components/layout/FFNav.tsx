@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Home, FolderOpen, FileText, Settings, Shield, Search, LogOut } from 'lucide-react';
 import { BrandMark } from '../brand/BrandMark';
 import { Wordmark } from '../brand/Wordmark';
+import { Avatar } from '../Avatar';
 
 export type NavStage = 'home' | 'browse' | 'notebook' | 'settings' | 'admin';
 
@@ -126,12 +127,16 @@ export function FFNav({ user, currentStage, hasOpenNotebook, onNav, onLogout, on
           className="flex items-center gap-2 h-8 pl-1 pr-3 rounded-full hover:bg-bg-secondary transition-colors"
           title={displayName}
         >
-          <span
-            className="w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center"
-            style={{ background: 'var(--color-accent)', color: 'var(--color-accent-fg)' }}
-          >
-            {initial}
-          </span>
+          {user?.username
+            ? <Avatar username={user.username} displayName={displayName} size={24} />
+            : (
+              <span
+                className="w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center"
+                style={{ background: 'var(--color-accent)', color: 'var(--color-accent-fg)' }}
+              >
+                {initial}
+              </span>
+            )}
           <span className="text-[12px] text-text-secondary max-w-[12ch] truncate">{displayName}</span>
         </button>
         {menuOpen && (

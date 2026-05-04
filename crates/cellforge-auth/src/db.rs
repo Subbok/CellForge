@@ -30,6 +30,16 @@ pub struct User {
     /// app can demote or delete them. Filled in by `list_users`/`get_user`.
     #[serde(default)]
     pub is_super_admin: bool,
+    /// Optional email — used **only** to derive the Gravatar SHA-256 hash
+    /// for the avatar route. Never displayed, never used for auth or
+    /// notifications. Empty string serialises to `None`.
+    #[serde(default)]
+    pub email: Option<String>,
+    /// True when the user has uploaded a local avatar. The actual path is
+    /// kept server-side; the frontend just decides whether to show the
+    /// "remove" button.
+    #[serde(default)]
+    pub has_avatar: bool,
 }
 
 /// Bcrypt hash of a fixed dummy password at cost 12 — same cost factor used
@@ -189,6 +199,22 @@ impl UserDb {
             )?;
         }
 
+        // Migration 9 — profile fields: optional email (used only to derive
+        // the Gravatar URL) and a path to a locally-stored avatar PNG.
+        // Both columns are TEXT with no default so unset = NULL — the
+        // avatar route falls back through the chain (local file → Gravatar
+        // proxy → 404 / initial-letter on the frontend) per row.
+        //
+        // Each ALTER is run in its own statement and the error swallowed —
+        // a fresh DB already has these columns courtesy of
+        // `create_all_tables`, and an existing DB on user_version=8 needs
+        // them added. SQLite has no `ADD COLUMN IF NOT EXISTS`.
+        if version < 9 {
+            let _ = conn.execute_batch("ALTER TABLE users ADD COLUMN email TEXT");
+            let _ = conn.execute_batch("ALTER TABLE users ADD COLUMN avatar_path TEXT");
+            conn.execute_batch("PRAGMA user_version = 9;")?;
+        }
+
         Ok(())
     }
 
@@ -207,6 +233,8 @@ impl UserDb {
                 max_memory_mb INTEGER NOT NULL DEFAULT 0,
                 group_name TEXT NOT NULL DEFAULT '',
                 last_active DATETIME DEFAULT NULL,
+                email TEXT,
+                avatar_path TEXT,
                 is_active INTEGER NOT NULL DEFAULT 0,
                 is_disabled INTEGER NOT NULL DEFAULT 0,
                 token_version INTEGER NOT NULL DEFAULT 0,
@@ -320,6 +348,8 @@ impl UserDb {
             created_by: created_by.to_string(),
             last_seen_at: None,
             is_super_admin: id == 1,
+            email: None,
+            has_avatar: false,
         })
     }
 
@@ -488,6 +518,8 @@ impl UserDb {
                     created_by: String::new(),
                     last_seen_at: None,
                     is_super_admin: id == 1,
+                    email: None,
+                    has_avatar: false,
                 })
             }
             _ => bail!("invalid username or password"),
@@ -520,11 +552,12 @@ impl UserDb {
     pub fn get_user(&self, username: &str) -> Result<User> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at FROM users WHERE username = ?1"
+            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at, email, avatar_path FROM users WHERE username = ?1"
         )?;
 
         stmt.query_row(rusqlite::params![username], |row| {
             let id: i64 = row.get(0)?;
+            let avatar_path: Option<String> = row.get(9)?;
             Ok(User {
                 id,
                 username: row.get(1)?,
@@ -535,6 +568,8 @@ impl UserDb {
                 created_by: row.get(6)?,
                 last_seen_at: row.get(7)?,
                 is_super_admin: id == 1,
+                email: row.get(8)?,
+                has_avatar: avatar_path.is_some(),
             })
         })
         .map_err(|_| anyhow::anyhow!("user not found"))
@@ -543,11 +578,12 @@ impl UserDb {
     pub fn list_users(&self) -> Vec<User> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at FROM users ORDER BY id"
+            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at, email, avatar_path FROM users ORDER BY id"
         ).unwrap();
 
         stmt.query_map([], |row| {
             let id: i64 = row.get(0)?;
+            let avatar_path: Option<String> = row.get(9)?;
             Ok(User {
                 id,
                 username: row.get(1)?,
@@ -558,11 +594,71 @@ impl UserDb {
                 created_by: row.get(6)?,
                 last_seen_at: row.get(7)?,
                 is_super_admin: id == 1,
+                email: row.get(8)?,
+                has_avatar: avatar_path.is_some(),
             })
         })
         .unwrap()
         .flatten()
         .collect()
+    }
+
+    /// Set the user's email (used solely for the Gravatar fallback URL).
+    /// Pass `None` to clear it.
+    pub fn set_email(&self, username: &str, email: Option<&str>) -> Result<()> {
+        let normalized = email
+            .map(|e| e.trim().to_lowercase())
+            .filter(|e| !e.is_empty());
+        let conn = self.conn.lock();
+        let rows = conn.execute(
+            "UPDATE users SET email = ?1 WHERE username = ?2",
+            rusqlite::params![normalized, username],
+        )?;
+        if rows == 0 {
+            bail!("user not found");
+        }
+        Ok(())
+    }
+
+    /// Record / clear the on-disk avatar location. Caller is responsible
+    /// for writing or removing the actual file before/after the DB update.
+    pub fn set_avatar_path(&self, username: &str, path: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock();
+        let rows = conn.execute(
+            "UPDATE users SET avatar_path = ?1 WHERE username = ?2",
+            rusqlite::params![path, username],
+        )?;
+        if rows == 0 {
+            bail!("user not found");
+        }
+        Ok(())
+    }
+
+    /// Look up the absolute avatar path for the given user, if any. Returns
+    /// `None` for users that haven't uploaded one — callers fall through
+    /// to the Gravatar / initial-letter chain.
+    pub fn avatar_path(&self, username: &str) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT avatar_path FROM users WHERE username = ?1",
+            rusqlite::params![username],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+    }
+
+    /// Look up the email for Gravatar derivation. Lowercased / trimmed at
+    /// write time so the SHA-256 hash is stable.
+    pub fn email_for(&self, username: &str) -> Option<String> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT email FROM users WHERE username = ?1",
+            rusqlite::params![username],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
     }
 
     /// Delete a user. By default refuses to drop admins (the auth route

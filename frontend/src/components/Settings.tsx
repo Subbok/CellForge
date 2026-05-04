@@ -8,6 +8,7 @@ import { Trash2, Upload, Check, Puzzle, Shield, RotateCcw, Key } from 'lucide-re
 import { useModal } from './ModalDialog';
 import type { PluginEntry, PluginScope } from '../plugins/types';
 import { BrandMark } from './brand/BrandMark';
+import { Avatar, bumpAvatar } from './Avatar';
 import { APP_VERSION } from '../lib/version';
 
 interface Props {
@@ -132,6 +133,7 @@ function ProfilePane({ user }: { user?: { username: string; is_admin: boolean } 
   return (
     <>
       <PaneHeader title={t('settings.secProfile')} subtitle={t('settings.subProfile')} />
+      {user && <ProfileImageEmail username={user.username} />}
       <Row label={t('auth.username')}>
         <span className="font-mono text-text" style={{ fontSize: 13 }}>{user?.username ?? '—'}</span>
       </Row>
@@ -156,6 +158,162 @@ function ProfilePane({ user }: { user?: { username: string; is_admin: boolean } 
         <ChangePassword />
       </div>
     </>
+  );
+}
+
+/** Avatar upload + email-for-Gravatar pair. Sits at the top of the
+ *  Profile pane because it's the visual identity surface — everything
+ *  below it is text and account flags. */
+function ProfileImageEmail({ username }: { username: string }) {
+  const [hasLocal, setHasLocal] = useState(false);
+  const [email, setEmail] = useState('');
+  const [emailDirty, setEmailDirty] = useState(false);
+  const [busy, setBusy] = useState<'upload' | 'remove' | 'email' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.avatarStatus().then(s => {
+      if (cancelled) return;
+      setHasLocal(s.has_local);
+      setEmail(s.email ?? '');
+      setEmailDirty(false);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setBusy('upload');
+    try {
+      await api.uploadAvatar(file);
+      setHasLocal(true);
+      bumpAvatar(username);
+      flash();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  async function onRemove() {
+    setError(null);
+    setBusy('remove');
+    try {
+      await api.deleteAvatar();
+      setHasLocal(false);
+      bumpAvatar(username);
+      flash();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onSaveEmail() {
+    setError(null);
+    setBusy('email');
+    try {
+      await api.setEmail(email);
+      bumpAvatar(username);
+      setEmailDirty(false);
+      flash();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function flash() {
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1500);
+  }
+
+  return (
+    <div style={{
+      display: 'flex',
+      gap: 20,
+      padding: '16px 0 20px',
+      borderBottom: '1px solid var(--color-border-subtle)',
+      marginBottom: 12,
+    }}>
+      <Avatar username={username} size={72} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={busy === 'upload'}
+            className="btn btn-md btn-primary"
+          >
+            {busy === 'upload' ? 'Uploading…' : hasLocal ? 'Change picture' : 'Upload picture'}
+          </button>
+          {hasLocal && (
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={busy === 'remove'}
+              className="btn btn-md btn-secondary"
+            >
+              {busy === 'remove' ? 'Removing…' : 'Remove'}
+            </button>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={onUpload}
+            style={{ display: 'none' }}
+          />
+          {savedFlash && (
+            <span style={{ fontSize: 11, color: 'var(--color-success)' }}>Saved</span>
+          )}
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--color-text-muted)', margin: '6px 0 16px' }}>
+          PNG / JPG / WebP. Resized to 256×256.
+        </p>
+
+        <label
+          style={{
+            display: 'block',
+            fontSize: 12,
+            color: 'var(--color-text-secondary)',
+            marginBottom: 6,
+          }}
+        >
+          Email <span style={{ color: 'var(--color-text-muted)' }}>(used only for Gravatar fallback)</span>
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="email"
+            value={email}
+            onChange={e => { setEmail(e.target.value); setEmailDirty(true); }}
+            placeholder="you@example.com"
+            className="field"
+            style={{ flex: 1 }}
+          />
+          <button
+            type="button"
+            onClick={onSaveEmail}
+            disabled={!emailDirty || busy === 'email'}
+            className="btn btn-md btn-primary"
+          >
+            {busy === 'email' ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+        {error && (
+          <p style={{ fontSize: 11, color: 'var(--color-error)', marginTop: 6 }}>{error}</p>
+        )}
+      </div>
+    </div>
   );
 }
 
