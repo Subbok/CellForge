@@ -8,9 +8,12 @@ use wry::WebViewBuilder;
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/icon.png");
 
 fn load_window_icon() -> Option<Icon> {
-    let decoder = png::Decoder::new(ICON_PNG);
+    // png 0.18+ requires BufRead + Seek; wrap the static byte slice in a
+    // Cursor so the decoder can rewind for the IDAT/IEND chunk discovery
+    // it does internally. Earlier versions accepted plain &[u8].
+    let decoder = png::Decoder::new(std::io::Cursor::new(ICON_PNG));
     let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0; reader.output_buffer_size()];
+    let mut buf = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     // png crate can yield RGB or RGBA depending on the source; Icon::from_rgba
     // wants straight RGBA so expand if needed.
