@@ -62,20 +62,30 @@ export const useNotebookStore = create<NotebookState>((set) => ({
   diffView: null,
   pendingFirstOutput: new Set(),
 
-  loadNotebook: (path, nb) => set({
-    filePath: path,
-    metadata: nb.metadata,
-    cells: nb.cells.map(c => ({
+  loadNotebook: (path, nb) => {
+    // nbformat <4.5 doesn't require cell ids, and many real-world notebooks
+    // ship without them. Without ids every cell collapses onto the same
+    // store key — patchCell, the React `key`, and the Yjs Y.Text channel
+    // all derive from `cell.id`, so undefined ids make every editor mirror
+    // the first cell. Mint a fresh uuid for any cell that arrived without
+    // one; the next save persists them so this only happens once per file.
+    const cells = nb.cells.map(c => ({
       ...c,
+      id: c.id || uuid(),
       source: Array.isArray(c.source) ? (c.source as string[]).join('') : c.source,
       outputs: c.outputs ?? [],
       execution_count: c.execution_count ?? null,
       status: 'idle' as const,
       execTimeMs: null,
-    })),
-    activeCellId: nb.cells[0]?.id ?? null,
-    dirty: false,
-  }),
+    }));
+    set({
+      filePath: path,
+      metadata: nb.metadata,
+      cells,
+      activeCellId: cells[0]?.id ?? null,
+      dirty: false,
+    });
+  },
 
   addCell: (type, index, cellId) => set(s => {
     if (cellId && s.cells.some(c => c.id === cellId)) {
