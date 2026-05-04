@@ -127,6 +127,7 @@ function HtmlCellOutput({ html }: { html: string }) {
   // gives the iframe a null origin — user scripts cannot reach
   // CellForge's origin via fetch/XHR/Cookie/localStorage.
   const srcDoc = `<!DOCTYPE html><html><head><style>
+    html { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent; }
     body { margin: 0; padding: 8px; font-family: ui-sans-serif, system-ui, sans-serif;
            color: #ebedf2; background: transparent; font-size: 14px; line-height: 1.5; }
     a { color: #7a99ff; }
@@ -134,6 +135,14 @@ function HtmlCellOutput({ html }: { html: string }) {
     th, td { padding: 4px 8px; border: 1px solid #3f4154; text-align: left; }
     pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     img { max-width: 100%; }
+    /* iframe is null-origin so the parent's global scrollbar styling
+       can't reach in — restate the Forge palette here so DataFrame /
+       wide HTML outputs match the rest of the app. */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.32); }
+    ::-webkit-scrollbar-corner { background: transparent; }
   </style></head><body>${html}
 <script>
   function report() {
