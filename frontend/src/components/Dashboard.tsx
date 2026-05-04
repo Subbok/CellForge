@@ -12,9 +12,13 @@ import { FFModalShell, FFInput } from './modals/FFModalShell';
 
 interface Props {
   onOpenNotebook: (path: string, notebook: Notebook) => void;
+  /** Called when the user clicks a tabular data file (CSV/TSV/etc.).
+   *  Unlike notebook-open this skips the kernel-picker stage — data
+   *  preview is read-only and doesn't need a kernel attached. */
+  onOpenDataFile?: (path: string) => void;
 }
 
-export function Dashboard({ onOpenNotebook }: Props) {
+export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
   const { t } = useTranslation();
   const [cwd, setCwd] = useState('');
   const [_rootDir, setRootDir] = useState('');
@@ -365,6 +369,7 @@ export function Dashboard({ onOpenNotebook }: Props) {
                   onOpen={() => {
                     if (f.is_dir) navigateInto(f.path);
                     else if (f.name.endsWith('.ipynb')) openNotebook(f.path);
+                    else if (/\.(csv|tsv|json|jsonl|ndjson|parquet|pq)$/i.test(f.name)) onOpenDataFile?.(f.path);
                   }}
                   onShare={() => openShareModal(f.path)}
                   onDownload={!f.is_dir ? () => api.downloadFile(f.path).catch(e => setError(e.message)) : undefined}
@@ -519,7 +524,8 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const isNotebook = file.name.endsWith('.ipynb');
-  const clickable = file.is_dir || isNotebook;
+  const isData = /\.(csv|tsv|json|jsonl|ndjson|parquet|pq)$/i.test(file.name);
+  const clickable = file.is_dir || isNotebook || isData;
 
   useEffect(() => {
     function handler(e: MouseEvent) {

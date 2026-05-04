@@ -3,6 +3,7 @@ import { TopBar } from '../toolbar/TopBar';
 import { TabStrip } from '../toolbar/TabBar';
 import { useTabStore } from '../../stores/tabStore';
 import { Notebook } from '../notebook/Notebook';
+import { DataViewer } from '../data/DataViewer';
 import { SearchBar } from '../notebook/SearchBar';
 import { ShortcutHelp } from '../ShortcutHelp';
 import { ContextMenuHost } from '../ContextMenu';
@@ -12,6 +13,27 @@ import { useNotebookStore } from '../../stores/notebookStore';
 import { api } from '../../services/api';
 import { undo, redo } from '../../services/undoRedo';
 import { broadcastSaved } from '../../services/collaboration';
+
+/** Pick the right content view for the active tab. Notebook tabs fall back
+ *  to the existing `Notebook` component (which reads from the notebook
+ *  store), data tabs render a fresh `DataViewer` keyed by path so switching
+ *  between two CSVs remounts cleanly. When no tabs are open we still render
+ *  Notebook — it gracefully shows an empty state and that's also what
+ *  freshly-opened sessions hit before the first file is picked. */
+function ActiveTabContent() {
+  const tabs = useTabStore(s => s.tabs);
+  const activeId = useTabStore(s => s.activeTabId);
+  const active = tabs.find(t => t.id === activeId);
+
+  if (active?.kind === 'data') {
+    return <DataViewer path={active.path} />;
+  }
+  return (
+    <div className="h-full overflow-y-auto">
+      <Notebook />
+    </div>
+  );
+}
 
 function TabStripRow({ username }: { username: string }) {
   const tabs = useTabStore(s => s.tabs);
@@ -151,8 +173,8 @@ export function AppLayout({ onExport, onSwitchKernel, username }: {
       {shortcutHelp && <ShortcutHelp onClose={() => setShortcutHelp(false)} />}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {sidebarSide === 'left' && sidebarEl}
-        <main className="flex-1 min-w-0 overflow-y-auto" style={{ background: 'var(--color-bg)' }}>
-          <Notebook />
+        <main className="flex-1 min-w-0 overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+          <ActiveTabContent />
         </main>
         {sidebarSide === 'right' && sidebarEl}
       </div>

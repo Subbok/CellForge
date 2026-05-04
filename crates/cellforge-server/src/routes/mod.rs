@@ -1,7 +1,9 @@
 pub mod admin;
 pub mod ai;
 pub mod auth;
+pub mod avatar;
 pub mod dashboard;
+pub mod data;
 pub mod export;
 pub mod fileops;
 pub mod files;

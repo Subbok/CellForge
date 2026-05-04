@@ -11,6 +11,7 @@ cellforge-reactive = { path = "../cellforge-reactive" }
 cellforge-export = { path = "../cellforge-export" }
 cellforge-auth = { path = "../cellforge-auth" }
 cellforge-config = { path = "../cellforge-config" }
+cellforge-data = { path = "../cellforge-data" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -31,6 +32,11 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+# Avatar pipeline — `image` decodes/resizes uploads to a uniform 256×256 PNG;
+# `sha2` derives the Gravatar URL (lowercase-trimmed-email → SHA-256).
+# Default features pulled because we need PNG/JPEG/WebP decoders.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+sha2 = "0.11"
 rust-embed = { version = "8", optional = true }
 mime_guess = { version = "2", optional = true }
 

@@ -9,11 +9,12 @@ members = [
     "crates/cellforge-varexplorer",
     "crates/cellforge-export",
     "crates/cellforge-auth",
+    "crates/cellforge-data",
     "crates/cellforge-app",
 ]
 
 [workspace.package]
-version = "1.2.0"
+version = "1.2.5"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 

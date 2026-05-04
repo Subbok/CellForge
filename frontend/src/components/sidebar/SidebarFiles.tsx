@@ -37,6 +37,36 @@ export function SidebarFiles() {
     }
   }
 
+  function openDataFile(path: string) {
+    // Data tabs don't load anything synchronously — DataViewer fetches the
+    // first page on mount. We still call saveCurrentTab so a dirty notebook
+    // doesn't get silently dropped when the user clicks a CSV from the
+    // sidebar mid-edit.
+    saveCurrentTab();
+    const name = path.split('/').pop() ?? 'data';
+    useTabStore.getState().addDataTab(path, name);
+  }
+
+  /** Returns the tab kind we should open for a given filename, or null when
+   *  it isn't a previewable type. Centralised so the predicate matches the
+   *  click handler exactly. */
+  function tabKindFor(name: string): 'notebook' | 'data' | null {
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.ipynb')) return 'notebook';
+    if (
+      lower.endsWith('.csv') ||
+      lower.endsWith('.tsv') ||
+      lower.endsWith('.json') ||
+      lower.endsWith('.jsonl') ||
+      lower.endsWith('.ndjson') ||
+      lower.endsWith('.parquet') ||
+      lower.endsWith('.pq')
+    ) {
+      return 'data';
+    }
+    return null;
+  }
+
   const crumbs = cwd.split('/').filter(Boolean);
 
   return (
@@ -68,21 +98,23 @@ export function SidebarFiles() {
       )}
 
       {files.map(f => {
-        const isNb = f.name.endsWith('.ipynb');
+        const kind = f.is_dir ? null : tabKindFor(f.name);
+        const openable = f.is_dir || kind != null;
         return (
           <button
             key={f.path}
             onClick={() => {
               if (f.is_dir) setCwd(f.path);
-              else if (isNb) openNotebook(f.path);
+              else if (kind === 'notebook') openNotebook(f.path);
+              else if (kind === 'data') openDataFile(f.path);
             }}
             className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded transition-colors ${
-              f.is_dir || isNb ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-40'
+              openable ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-40'
             }`}
           >
             {f.is_dir
               ? <Folder size={13} className="text-warning shrink-0" />
-              : <FileText size={13} className={`shrink-0 ${isNb ? 'text-accent' : 'text-text-muted'}`} />}
+              : <FileText size={13} className={`shrink-0 ${kind === 'notebook' ? 'text-accent' : kind === 'data' ? 'text-success' : 'text-text-muted'}`} />}
             <span className="truncate">{f.name}</span>
           </button>
         );

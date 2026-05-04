@@ -68,10 +68,20 @@ export function removeTabSnapshot(tabId: string) {
 export function switchToTab(id: string, username: string) {
   saveCurrentTab();
   useTabStore.getState().setActiveTab(id);
-  restoreTab(id);
 
   const tab = useTabStore.getState().tabs.find(t => t.id === id);
   if (!tab) return;
+
+  // Data tabs are read-only previews — they don't own a notebook, kernel,
+  // or yjs document, so we deliberately skip the WS/collab/notebook-restore
+  // dance. Doing it anyway would tear down the kernel session of whatever
+  // notebook the user was editing before switching to the CSV.
+  if (tab.kind === 'data') {
+    window.history.pushState(null, '', `/notebook/${encodeURIComponent(tab.path)}`);
+    return;
+  }
+
+  restoreTab(id);
 
   // reconnect WS + collab to the target tab. Without a kernel name we can't
   // know which kernel to attach, so fall back to the notebook metadata's

@@ -7,7 +7,9 @@ mod ws;
 pub use config::Config;
 
 use crate::plugins::routes as plugin_routes;
-use crate::routes::{admin, ai, auth, dashboard, export, fileops, files, git, kernels, notebooks};
+use crate::routes::{
+    admin, ai, auth, avatar, dashboard, data, export, fileops, files, git, kernels, notebooks,
+};
 use crate::state::AppState;
 use crate::ws::handler::ws_handler;
 
@@ -242,6 +244,15 @@ fn build_api_router() -> Router<Arc<AppState>> {
             "/templates/{name}/assets",
             axum::routing::post(export::upload_template_assets),
         )
+        .route("/data/preview/{*path}", get(data::preview))
+        .route("/data/stats/{*path}", get(data::column_stats))
+        .route("/users/me/avatar-status", get(avatar::me_avatar_status))
+        .route("/users/me/email", axum::routing::put(avatar::set_email))
+        .route(
+            "/users/me/avatar",
+            axum::routing::put(avatar::upload_avatar).delete(avatar::delete_avatar),
+        )
+        .route("/users/{username}/avatar", get(avatar::get_avatar))
         .route("/files/upload", axum::routing::post(fileops::upload))
         .route("/files/mkdir", axum::routing::post(fileops::mkdir))
         .route("/files/delete", axum::routing::post(fileops::delete_path))

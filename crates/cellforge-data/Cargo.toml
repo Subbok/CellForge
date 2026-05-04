@@ -1,0 +1,21 @@
+[package]
+name = "cellforge-data"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+csv = "1"
+# Parquet preview support. We disable the default `arrow` feature because
+# we don't need RecordBatch / Arrow types here — the row-based reader is
+# enough and pulling Arrow in would roughly triple our binary size for no
+# user-visible benefit. `snap`/`brotli`/`zstd` cover the codecs that real
+# files in the wild use.
+parquet = { version = "58", default-features = false, features = ["snap", "brotli", "zstd"] }
+
+[dev-dependencies]
+tempfile = "3"

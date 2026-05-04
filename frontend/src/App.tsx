@@ -464,10 +464,20 @@ function App() {
         />
       )}
       {stage === 'browse' && (
-        <Dashboard onOpenNotebook={(path, nb) => {
-          setPending({ path, nb });
-          setStage('kernel');
-        }} />
+        <Dashboard
+          onOpenNotebook={(path, nb) => {
+            setPending({ path, nb });
+            setStage('kernel');
+          }}
+          onOpenDataFile={(path) => {
+            // Data tabs skip the kernel picker — preview is read-only.
+            // Drop straight into the editor shell with a data tab active;
+            // the user can still hit the home button to come back.
+            const name = path.split('/').pop() ?? 'data';
+            useTabStore.getState().addDataTab(path, name);
+            setStageRaw('ready');
+          }}
+        />
       )}
       {stage === 'settings' && <SettingsPage user={user ?? undefined} />}
       {stage === 'admin' && <AdminPanel callerIsSuperAdmin={!!user?.is_super_admin} />}

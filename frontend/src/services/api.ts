@@ -55,6 +55,40 @@ export interface AuthUser {
   role?: string;
 }
 
+export type DataColumnType = 'int' | 'float' | 'bool' | 'date' | 'string' | 'null';
+export interface DataColumnSchema {
+  name: string;
+  type: DataColumnType;
+  nullable: boolean;
+}
+/** Cell value as it comes off the wire — JSON natives for typed columns,
+ *  string for everything else, `null` for missing cells. */
+export type DataCellValue = null | boolean | number | string;
+export interface DataPreviewResponse {
+  schema: DataColumnSchema[];
+  rows: DataCellValue[][];
+  total: number | null;
+  offset: number;
+}
+
+export interface DataColumnStats {
+  column: number;
+  count: number;
+  null_count: number;
+  /** `null` when the column had more than the backend's distinct-tracking
+   *  cap (10k) — we render that as "—" rather than a misleading number. */
+  distinct: number | null;
+  min: DataCellValue | undefined;
+  max: DataCellValue | undefined;
+  mean: number | null;
+}
+
+export interface DataStatsResponse {
+  schema: DataColumnSchema[];
+  stats: DataColumnStats[];
+  total: number;
+}
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -151,6 +185,18 @@ export const api = {
   createNotebook: (name?: string) => post<{ name: string; path: string }>('/notebooks', { name }),
   renameNotebook: (oldPath: string, newName: string) => post<{ path: string }>('/notebooks/rename', { old_path: oldPath, new_name: newName }),
   listFiles: (path?: string) => get<FileEntry[]>(path ? `/files/${path}` : '/files'),
+  dataPreview: (path: string, opts: {
+    offset?: number; limit?: number; sortCol?: number; sortDir?: 'asc' | 'desc';
+  } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.offset != null) q.set('offset', String(opts.offset));
+    if (opts.limit != null) q.set('limit', String(opts.limit));
+    if (opts.sortCol != null) q.set('sort_col', String(opts.sortCol));
+    if (opts.sortDir) q.set('sort_dir', opts.sortDir);
+    const qs = q.toString();
+    return get<DataPreviewResponse>(`/data/preview/${path}${qs ? '?' + qs : ''}`);
+  },
+  dataStats: (path: string) => get<DataStatsResponse>(`/data/stats/${path}`),
   listTemplates: () => get<{ name: string; variables: { key: string; default_value: string }[] }[]>('/templates'),
   uploadTemplate: async (name: string, typContent: string, assets: File[]) => {
     const form = new FormData();
@@ -169,6 +215,32 @@ export const api = {
   },
   changePassword: (newPassword: string, username?: string) =>
     post<{ ok: boolean; error?: string }>('/auth/change-password', { new_password: newPassword, username }),
+
+  // Profile (avatar + email used only for Gravatar derivation)
+  avatarStatus: () => get<{ has_local: boolean; email: string | null }>('/users/me/avatar-status'),
+  setEmail: (email: string) =>
+    fetch(`${BASE}/users/me/email`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }).then(r => {
+      if (!r.ok) throw new Error(`Email update failed (${r.status})`);
+    }),
+  uploadAvatar: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    const res = await fetch(`${BASE}/users/me/avatar`, {
+      method: 'PUT',
+      credentials: 'include',
+      body: form,
+    });
+    if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+  },
+  deleteAvatar: () =>
+    fetch(`${BASE}/users/me/avatar`, { method: 'DELETE', credentials: 'include' }).then(r => {
+      if (!r.ok) throw new Error(`Remove failed (${r.status})`);
+    }),
 
   // AI
   aiChat: (provider: string, apiKey: string, messages: { role: string; content: string }[], opts?: {

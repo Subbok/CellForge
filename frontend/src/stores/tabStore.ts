@@ -1,12 +1,18 @@
 import { create } from 'zustand';
 import { uuid } from '../lib/uuid';
 
+export type TabKind = 'notebook' | 'data';
+
 export interface Tab {
   id: string;
   path: string;
   name: string;
+  /** What's rendered for this tab. Defaults to notebook for backward
+   * compatibility — old persisted tab lists won't have this field. */
+  kind: TabKind;
   /** Kernel the notebook was opened with; used when switching back to this
-   *  tab to reconnect WS to the right kernel. */
+   *  tab to reconnect WS to the right kernel. Only meaningful for
+   *  `kind === 'notebook'`. */
   kernelName?: string;
 }
 
@@ -15,6 +21,9 @@ interface TabState {
   activeTabId: string | null;
 
   addTab(path: string, name: string, kernelName?: string): string; // returns tab id
+  /** Open a data viewer tab (CSV/TSV/JSONL/Parquet later). Path is relative
+   *  to the user's workspace, same convention as notebook tabs. */
+  addDataTab(path: string, name: string): string;
   closeTab(id: string): void;
   setActiveTab(id: string): void;
   /** Drag-and-drop reorder: insert `dragId` immediately before `overId`. */
@@ -40,7 +49,21 @@ export const useTabStore = create<TabState>((set, get) => ({
 
     const id = uuid();
     set(s => ({
-      tabs: [...s.tabs, { id, path, name, kernelName }],
+      tabs: [...s.tabs, { id, path, name, kind: 'notebook', kernelName }],
+      activeTabId: id,
+    }));
+    return id;
+  },
+
+  addDataTab: (path, name) => {
+    const existing = get().tabs.find(t => t.path === path);
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return existing.id;
+    }
+    const id = uuid();
+    set(s => ({
+      tabs: [...s.tabs, { id, path, name, kind: 'data' }],
       activeTabId: id,
     }));
     return id;
