@@ -8,6 +8,6 @@ serde = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
-tree-sitter = "0.25"
+tree-sitter = "0.26"
 tree-sitter-python = "0.25"
 indexmap = { version = "2", features = ["serde"] }
