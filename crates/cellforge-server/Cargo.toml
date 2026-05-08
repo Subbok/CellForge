@@ -29,7 +29,7 @@ futures = "0.3"
 dirs = "6"
 axum-extra = { version = "0.12", features = ["multipart"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-sysinfo = { version = "0.38", default-features = false, features = ["system"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 # Avatar pipeline — `image` decodes/resizes uploads to a uniform 256×256 PNG;
