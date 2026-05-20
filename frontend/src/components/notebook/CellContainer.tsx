@@ -27,7 +27,8 @@ function statusColor(status: string) {
   }
 }
 
-// small icon button used in the cell toolbar
+// small icon button used in the cell toolbar — visually p-1 (21px) but
+// gets a 36×36 hit zone on <md so it's tappable on a phone.
 function CellBtn({ onClick, title, danger, children }: {
   onClick: (e: React.MouseEvent) => void;
   title: string;
@@ -37,7 +38,7 @@ function CellBtn({ onClick, title, danger, children }: {
   return (
     <button
       onClick={e => { e.stopPropagation(); onClick(e); }}
-      className={`p-1 rounded hover:bg-bg-hover text-text-muted ${danger ? 'hover:text-error' : 'hover:text-accent'}`}
+      className={`p-1 rounded inline-flex items-center justify-center min-w-[36px] min-h-[36px] md:min-w-0 md:min-h-0 hover:bg-bg-hover text-text-muted ${danger ? 'hover:text-error' : 'hover:text-accent'}`}
       title={title}
     >
       {children}
@@ -362,7 +363,7 @@ function InlineDiff({ oldSource, newSource, onClose }: {
         <span className="text-[10px] text-warning font-medium">Changes</span>
         <button onClick={onClose} className="text-[10px] text-text-muted hover:text-text-secondary">close</button>
       </div>
-      <div className="grid grid-cols-2 divide-x divide-border text-[10px] font-mono leading-relaxed max-h-60 overflow-y-auto">
+      <div className="grid grid-cols-1 md:grid-cols-2 md:divide-x md:divide-border text-[10px] font-mono leading-relaxed max-h-60 overflow-y-auto">
         <div className="bg-bg">
           <div className="px-2 py-0.5 text-text-muted bg-bg-elevated border-b border-border">Previous</div>
           {diff.map((line, i) => (

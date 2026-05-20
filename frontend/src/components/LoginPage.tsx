@@ -94,12 +94,12 @@ export function LoginPage({ isFirstUser, onSuccess }: Props) {
       <div
         className="relative"
         style={{
-          width: 460, padding: 44,
+          width: 'min(460px, calc(100vw - 24px))',
+          padding: 'clamp(24px, 6vw, 44px)',
           background: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)',
           borderRadius: 12,
           boxShadow: '0 30px 80px rgba(0,0,0,0.5)',
-          zoom: 1.15,
         }}
       >
         {/* Brand: mark + wordmark inline */}

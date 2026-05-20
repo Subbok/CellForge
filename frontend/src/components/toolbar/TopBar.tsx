@@ -191,11 +191,9 @@ export function TopBar({ onExport, onSwitchKernel }: {
 
   return (
     <header
-      className="flex items-center shrink-0"
+      className="flex items-center shrink-0 px-2 md:pl-5 md:pr-4 gap-2 md:gap-3"
       style={{
         height: 48,
-        padding: '0 16px 0 20px',
-        gap: 12,
         background: 'var(--color-bg)',
         borderBottom: '1px solid var(--color-border-subtle)',
       }}
@@ -226,9 +224,12 @@ export function TopBar({ onExport, onSwitchKernel }: {
         <ChevronDown size={10} style={{ opacity: 0.7, flexShrink: 0 }} />
       </button>
 
-      {/* Saved chip */}
+      {/* Saved chip — hidden on <md since TopBar action chips already
+          eat the available horizontal room and the chip's role is purely
+          informational (no click target). */}
       <span
         title={dirty ? 'Notebook has unsaved changes' : 'All changes saved'}
+        className="hidden md:inline"
         style={{
           padding: '3px 8px', borderRadius: 4, fontSize: 11,
           background: dirty
@@ -245,11 +246,13 @@ export function TopBar({ onExport, onSwitchKernel }: {
       {/* Collaborators */}
       <PresenceIndicator />
 
-      {/* App / Code mode toggle */}
+      {/* App / Code mode toggle — hidden on <md entirely (mobile use case is
+          "preview + Run All", not switching edit modes). Lives in the More
+          menu on phone for power users. */}
       <button
         onClick={toggleAppMode}
         title={appMode ? 'Switch to Editor Mode' : 'Switch to App Mode'}
-        className="inline-flex items-center transition-colors"
+        className="hidden md:inline-flex items-center justify-center transition-colors"
         style={{
           gap: 5, padding: '5px 10px',
           borderRadius: 6, fontSize: 12, fontWeight: 500,
@@ -262,41 +265,45 @@ export function TopBar({ onExport, onSwitchKernel }: {
         }}
       >
         {appMode ? <LayoutTemplate size={12} /> : <Code2 size={12} />}
-        {appMode ? 'App' : 'Code'}
+        <span className="hidden md:inline">{appMode ? 'App' : 'Code'}</span>
       </button>
 
-      {/* Action cluster: Run all · Clear · Restart · Share · Export · More */}
+      {/* Action cluster: Run all · (Clear · Restart · Share — desktop only) · Export · More.
+          On <md only Run all + Export stay visible; Clear/Restart/Share fold into More. */}
       <div className="flex items-center" style={{ gap: 6 }}>
         <ChipButton title="Run all cells" onClick={runAllCells}>
-          <Play size={12} /> Run all
+          <Play size={12} /> <span className="hidden md:inline">Run all</span>
         </ChipButton>
-        <ChipButton title="Clear all outputs" onClick={clearAllOutputs}>
-          <Eraser size={12} /> Clear
-        </ChipButton>
-        <ChipButton
-          title="Restart kernel"
-          onClick={() => { setRestartRunAll(false); setRestartOpen(true); }}
-        >
-          <RotateCcw size={12} /> Restart
-        </ChipButton>
-        <ChipButton title="Share" onClick={openShare}>
-          <Share2 size={12} /> Share
-        </ChipButton>
+        <div className="hidden md:contents">
+          <ChipButton title="Clear all outputs" onClick={clearAllOutputs}>
+            <Eraser size={12} /> Clear
+          </ChipButton>
+          <ChipButton
+            title="Restart kernel"
+            onClick={() => { setRestartRunAll(false); setRestartOpen(true); }}
+          >
+            <RotateCcw size={12} /> Restart
+          </ChipButton>
+          <ChipButton title="Share" onClick={openShare}>
+            <Share2 size={12} /> Share
+          </ChipButton>
+        </div>
         <ChipButton title="Export" onClick={onExport} primary>
-          <Download size={12} /> Export
+          <Download size={12} /> <span className="hidden md:inline">Export</span>
         </ChipButton>
 
-        {/* More — secondary actions tucked away */}
+        {/* More — secondary actions tucked away. On <md also holds the
+            chips hidden above (Clear/Restart/Share). */}
         <div className="relative" ref={moreRef}>
           <button
             onClick={() => setMoreOpen(v => !v)}
             title="More actions"
+            className="inline-flex items-center justify-center w-9 h-9 md:w-7 md:h-7"
             style={{
-              width: 28, height: 28, borderRadius: 6,
+              borderRadius: 6,
               background: 'var(--color-bg-elevated)',
               border: '1px solid var(--color-border)',
               color: 'var(--color-text-secondary)',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer',
             }}
           >
@@ -307,6 +314,16 @@ export function TopBar({ onExport, onSwitchKernel }: {
               className="absolute right-0 top-full mt-1 z-30 py-1 w-52 rounded-lg shadow-2xl shadow-black/60"
               style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
             >
+              {/* Mobile-only block — folds in the chips hidden on <md. */}
+              <div className="md:hidden">
+                <MoreItem icon={<Eraser size={13} />} label="Clear outputs"
+                  onClick={() => { setMoreOpen(false); clearAllOutputs(); }} />
+                <MoreItem icon={<RotateCcw size={13} />} label="Restart kernel"
+                  onClick={() => { setMoreOpen(false); setRestartRunAll(false); setRestartOpen(true); }} />
+                <MoreItem icon={<Share2 size={13} />} label="Share"
+                  onClick={() => { setMoreOpen(false); openShare(); }} />
+                <div style={{ borderTop: '1px solid var(--color-border-subtle)' }} className="my-1" />
+              </div>
               <MoreItem icon={<Play size={13} />} label="Run cell" hint="⇧↵"
                 onClick={() => { setMoreOpen(false); runActiveCell(); }} />
               <MoreItem icon={<Save size={13} />} label="Save" hint="⌘S" disabled={!dirty}
@@ -334,12 +351,12 @@ export function TopBar({ onExport, onSwitchKernel }: {
       <button
         onClick={toggleSidebar}
         title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+        className="inline-flex items-center justify-center w-9 h-9 md:w-7 md:h-7"
         style={{
-          width: 28, height: 28, borderRadius: 6,
+          borderRadius: 6,
           background: 'var(--color-bg-elevated)',
           border: '1px solid var(--color-border)',
           color: 'var(--color-text-secondary)',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer',
         }}
       >

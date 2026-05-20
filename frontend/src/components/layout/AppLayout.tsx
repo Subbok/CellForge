@@ -13,6 +13,7 @@ import { useNotebookStore } from '../../stores/notebookStore';
 import { api } from '../../services/api';
 import { undo, redo } from '../../services/undoRedo';
 import { broadcastSaved } from '../../services/collaboration';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 
 /** Pick the right content view for the active tab. Notebook tabs fall back
  *  to the existing `Notebook` component (which reads from the notebook
@@ -143,23 +144,51 @@ export function AppLayout({ onExport, onSwitchKernel, username }: {
 
   const sidebarWidth = useUIStore(s => s.sidebarWidth);
   const sidebarSide = useUIStore(s => s.sidebarSide);
+  const toggleSidebar = useUIStore(s => s.toggleSidebar);
 
-  // Sidebar width is the panel content; the 56px icon rail sits beside it,
-  // so the total column reserved is panel + rail. We also clamp it on small
-  // viewports so the notebook column always has at least ~360px to breathe —
-  // the user's persisted width might be wider than what the current window
-  // can sensibly accommodate (laptop docked into a 4K, then undocked, etc.).
-  const sidebarEl = sidebarOpen && (
+  // <md flips the sidebar from a push-content flex sibling to a slide-in
+  // drawer overlay — the notebook column on a 375px phone has no room to
+  // surrender 300+ pixels of variables/files panel. Tailwind md breakpoint
+  // is 768px, so the matchMedia query mirrors it (max-width 767).
+  const isMobile = useMediaQuery('(max-width: 767px)');
+
+  // Desktop sidebar: persisted-width column docked left or right.
+  // `maxWidth` keeps it from eating the notebook on narrow desktops (laptop
+  // docked into a 4K, then undocked) — 4rem leaves room for the main area.
+  const desktopSidebarEl = sidebarOpen && (
     <aside
       className="shrink-0 flex min-h-0"
       style={{
         width: sidebarWidth + 56,
-        maxWidth: 'calc(100vw - 360px)',
+        maxWidth: 'calc(100vw - 4rem)',
         background: 'var(--color-bg-secondary)',
       }}
     >
       <Sidebar side={sidebarSide} />
     </aside>
+  );
+
+  // Mobile drawer: fixed overlay with a backdrop. Right-side regardless of
+  // `sidebarSide` preference — the toggle button lives in TopBar's right
+  // corner, so anchoring the drawer there keeps the gesture intuitive.
+  const mobileDrawer = isMobile && sidebarOpen && (
+    <>
+      <div
+        className="fixed inset-0 z-30"
+        style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}
+        onClick={toggleSidebar}
+        aria-hidden
+      />
+      <aside
+        className="fixed inset-y-0 right-0 z-40 flex min-h-0 shadow-2xl"
+        style={{
+          width: 'min(320px, calc(100vw - 3rem))',
+          background: 'var(--color-bg-secondary)',
+        }}
+      >
+        <Sidebar side="right" />
+      </aside>
+    </>
   );
 
   return (
@@ -172,12 +201,13 @@ export function AppLayout({ onExport, onSwitchKernel, username }: {
       {searchOpen && <SearchBar onClose={() => setSearchOpen(false)} />}
       {shortcutHelp && <ShortcutHelp onClose={() => setShortcutHelp(false)} />}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {sidebarSide === 'left' && sidebarEl}
+        {!isMobile && sidebarSide === 'left' && desktopSidebarEl}
         <main className="flex-1 min-w-0 overflow-hidden" style={{ background: 'var(--color-bg)' }}>
           <ActiveTabContent />
         </main>
-        {sidebarSide === 'right' && sidebarEl}
+        {!isMobile && sidebarSide === 'right' && desktopSidebarEl}
       </div>
+      {mobileDrawer}
       <ContextMenuHost />
     </div>
   );

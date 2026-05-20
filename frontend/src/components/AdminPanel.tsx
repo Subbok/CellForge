@@ -343,9 +343,8 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
         radial-gradient(circle 800px at 0% 100%, rgba(96,165,250,0.06), transparent 60%),
         var(--color-bg)
       `,
-      zoom: 1.15,
     }}>
-      <div className="max-w-[1100px] mx-auto" style={{ padding: 32 }}>
+      <div className="max-w-[1100px] mx-auto" style={{ padding: 'clamp(16px, 4vw, 32px)' }}>
         {/* Page heading + subtitle + refresh */}
         <div className="flex items-start justify-between" style={{ marginBottom: 24 }}>
           <div>
@@ -419,21 +418,23 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
           overflow: 'hidden',
           marginBottom: 24,
         }}>
-          {/* Card header */}
-          <div className="flex items-center" style={{
+          {/* Card header — stacks vertically on <md so 180px search and the
+              Create button stop fighting the title for row space. */}
+          <div className="flex flex-col gap-2 md:flex-row md:items-center" style={{
             padding: '14px 18px',
             borderBottom: '1px solid var(--color-border-subtle)',
           }}>
             <div style={{ fontSize: 14, color: 'var(--color-text)', fontWeight: 600 }}>
               {t('admin.members')}
             </div>
-            <div className="ml-auto flex items-center" style={{ gap: 8 }}>
-              <div className="relative">
+            <div className="flex items-center md:ml-auto" style={{ gap: 8 }}>
+              <div className="relative flex-1 md:flex-none">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                 <input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder={t('admin.searchMembers')}
+                  className="w-full md:w-[180px]"
                   style={{
                     height: 28, paddingLeft: 28, paddingRight: 8,
                     borderRadius: 6, fontSize: 12,
@@ -441,7 +442,6 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
                     border: '1px solid var(--color-border)',
                     color: 'var(--color-text)',
                     outline: 'none',
-                    width: 180,
                   }}
                 />
               </div>
@@ -468,8 +468,8 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
             </div>
           </div>
 
-          {/* Column headers */}
-          <div className="grid items-center text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted"
+          {/* Column headers — hidden on <md (rows there use card layout). */}
+          <div className="hidden md:grid items-center text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted"
             style={{
               gridTemplateColumns: '40px 1.4fr 1fr 1fr 80px 1.4fr 100px 40px',
               padding: '10px 18px',
@@ -495,9 +495,8 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
             return (
               <div
                 key={u.username}
-                className="grid items-center"
+                className="grid items-center grid-cols-[40px_1fr_40px] md:grid-cols-[40px_1.4fr_1fr_1fr_80px_1.4fr_100px_40px]"
                 style={{
-                  gridTemplateColumns: '40px 1.4fr 1fr 1fr 80px 1.4fr 100px 40px',
                   padding: '12px 18px',
                   borderTop: '1px solid var(--color-border-subtle)',
                 }}
@@ -512,12 +511,34 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
                 }}>
                   {u.username[0].toUpperCase()}
                 </div>
-                {/* Username (mono) */}
-                <div className="font-mono" style={{ fontSize: 13, color: 'var(--color-text)' }}>
-                  {u.username}
+                {/* Username + (on mobile) role + meta sub-line */}
+                <div className="min-w-0">
+                  <div className="font-mono flex items-center gap-2" style={{ fontSize: 13, color: 'var(--color-text)' }}>
+                    <span className="truncate">{u.username}</span>
+                    {/* Role pill — inline next to username on <md, full column on md+ */}
+                    <span className="md:hidden" style={{
+                      padding: '2px 6px', borderRadius: 4, fontSize: 10,
+                      background: u.is_admin
+                        ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)'
+                        : 'var(--color-bg-hover)',
+                      color: u.is_admin ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                    }}>
+                      {u.is_admin ? 'admin' : 'user'}
+                    </span>
+                  </div>
+                  {/* Mobile-only meta sub-line — folds created_by/notebooks/
+                      last_seen into one truncated row. CPU/MEM bars are
+                      omitted on phone — too narrow to be readable. */}
+                  <div className="md:hidden text-[10px] text-text-muted truncate" style={{ marginTop: 2 }}>
+                    {[
+                      u.created_by ? `@${u.created_by}` : null,
+                      `${u.notebook_count} nb`,
+                      timeAgo(u.last_seen_at ?? u.created_at),
+                    ].filter(Boolean).join(' · ')}
+                  </div>
                 </div>
-                {/* Role pill */}
-                <div>
+                {/* Role pill — desktop column */}
+                <div className="hidden md:block">
                   <span style={{
                     padding: '2px 8px', borderRadius: 4, fontSize: 11,
                     background: u.is_admin
@@ -528,27 +549,23 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
                     {u.is_admin ? 'admin' : 'user'}
                   </span>
                 </div>
-                {/* Created by — bootstrap admin shows "—"; everyone else shows
-                    the admin who triggered their registration. */}
-                <div className="font-mono" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}
+                {/* Created by */}
+                <div className="hidden md:block font-mono" style={{ fontSize: 12, color: 'var(--color-text-muted)' }}
                   title={u.created_by || 'bootstrap admin'}>
                   {u.created_by ? `@${u.created_by}` : '—'}
                 </div>
-                {/* Notebooks count — actual count of .ipynb files in the
-                    user's workspace, computed by the admin endpoint. */}
-                <div style={{ fontSize: 13, color: 'var(--color-text)' }}
+                {/* Notebooks count */}
+                <div className="hidden md:block" style={{ fontSize: 13, color: 'var(--color-text)' }}
                   title={`${formatBytes(u.storage_bytes)} stored`}>
                   {u.notebook_count}
                 </div>
                 {/* Resources — MEM bar from kernel sum, CPU bar at 0 (not tracked) */}
-                <div style={{ fontSize: 11 }}>
+                <div className="hidden md:block" style={{ fontSize: 11 }}>
                   <FFBar value={cpuPct} label="CPU" />
                   <FFBar value={memPct} label="MEM" />
                 </div>
-                {/* Last seen — uses last_seen_at touched on every authenticated
-                    request, falls back to created_at for users who haven't
-                    signed in since migration 5 landed. */}
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                {/* Last seen */}
+                <div className="hidden md:block" style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                   {timeAgo(u.last_seen_at ?? u.created_at)}
                 </div>
                 {/* Kebab — dropdown is portalled to document.body so it
@@ -560,7 +577,7 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
                       else triggerRefs.current.delete(u.username);
                     }}
                     onClick={() => toggleMenu(u.username)}
-                    className="p-1 rounded text-text-muted hover:text-text hover:bg-bg-hover"
+                    className="p-1 rounded inline-flex items-center justify-center min-w-[36px] min-h-[36px] md:min-w-0 md:min-h-0 text-text-muted hover:text-text hover:bg-bg-hover"
                     aria-label="More"
                   >
                     <MoreVertical size={16} />

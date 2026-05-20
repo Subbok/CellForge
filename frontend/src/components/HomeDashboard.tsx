@@ -276,10 +276,10 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles }: Props) {
   const sharedBy = new Map((data?.shared_files ?? []).map(s => [s.file_name, s.from_user]));
 
   return (
-    <div className="h-full overflow-auto" style={{ background: 'var(--color-bg)', zoom: 1.15 }}>
-      <div className="max-w-[1100px] mx-auto" style={{ padding: '32px 32px 48px' }}>
+    <div className="h-full overflow-auto" style={{ background: 'var(--color-bg)' }}>
+      <div className="max-w-[1100px] mx-auto" style={{ padding: 'clamp(16px, 4vw, 32px) clamp(16px, 4vw, 32px) 48px' }}>
         {/* Greeting + actions */}
-        <div className="flex items-end justify-between" style={{ marginBottom: 28 }}>
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between" style={{ marginBottom: 28 }}>
           <div>
             <div className="font-semibold" style={{ fontSize: 30, color: 'var(--color-text)', letterSpacing: '-0.025em' }}>
               {t(greetingKey())}, {displayName}
@@ -365,8 +365,8 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles }: Props) {
           />
         </div>
 
-        {/* 2-column: Recent (1.6fr) + Activity (1fr) */}
-        <div className="grid" style={{ gridTemplateColumns: '1.6fr 1fr', gap: 20 }}>
+        {/* 2-column on md+, stacked on mobile so each panel gets full width */}
+        <div className="grid grid-cols-1 md:grid-cols-[1.6fr_1fr] gap-5">
           {/* Recent notebooks */}
           <section
             className="overflow-hidden"
@@ -410,12 +410,9 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles }: Props) {
                   <button
                     key={r.file_path}
                     onClick={() => openRecent(r.file_path)}
-                    className="w-full text-left hover:bg-bg-hover transition-colors"
+                    className="w-full text-left hover:bg-bg-hover transition-colors grid grid-cols-[36px_1fr_100px] md:grid-cols-[36px_1fr_140px_100px] items-center"
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: '36px 1fr 140px 100px',
                       padding: '12px 18px',
-                      alignItems: 'center',
                       borderTop: i ? '1px solid var(--color-border-subtle)' : 'none',
                       cursor: 'pointer',
                       background: 'transparent',
@@ -450,7 +447,7 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles }: Props) {
                         <div className="truncate" style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{folder}</div>
                       )}
                     </div>
-                    <div>
+                    <div className="hidden md:block">
                       <span style={{
                         padding: '2px 8px', borderRadius: 4,
                         background: 'var(--color-bg-hover)',

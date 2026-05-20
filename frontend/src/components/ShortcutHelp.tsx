@@ -40,7 +40,7 @@ export function ShortcutHelp({ onClose }: Props) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel w-[560px] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="modal-panel w-[min(560px,calc(100vw-1.5rem))] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 pt-5 pb-3 shrink-0">
           <h2 className="text-lg font-semibold text-text">{t('shortcuts.title')}</h2>
           <button onClick={onClose} className="p-1 rounded hover:bg-bg-hover text-text-muted">

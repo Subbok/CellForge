@@ -172,13 +172,12 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
           radial-gradient(circle 800px at 0% 100%, rgba(96,165,250,0.06), transparent 60%),
           var(--color-bg)
         `,
-        zoom: 1.15,
       }}
       onDragOver={e => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}>
 
-      <div className="relative max-w-5xl mx-auto" style={{ padding: '24px 32px' }}>
+      <div className="relative max-w-5xl mx-auto" style={{ padding: 'clamp(16px, 4vw, 24px) clamp(16px, 4vw, 32px)' }}>
         {/* Page heading + subtitle */}
         <div className="flex items-center justify-between" style={{ marginBottom: 20 }}>
           <div>
@@ -202,10 +201,11 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
           </div>
         </div>
 
-        {/* Toolbar: breadcrumbs / search / actions */}
-        <div className="flex items-center gap-3" style={{ marginBottom: 12 }}>
+        {/* Toolbar: breadcrumbs (row 1) / search + actions (row 2) on mobile;
+            single flex row on md+. */}
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3" style={{ marginBottom: 12 }}>
           {/* Breadcrumbs */}
-          <nav className="flex items-center gap-0.5 text-[13px] min-w-0 flex-1">
+          <nav className="flex items-center gap-0.5 text-[13px] min-w-0 md:flex-1">
             <button onClick={() => setCwd('')}
               className="px-2 h-7 rounded-lg hover:bg-bg-hover text-text-secondary font-medium">
               {t('dashboard.home')}
@@ -224,8 +224,11 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
             })}
           </nav>
 
+          {/* Bottom row on mobile: search + actions in one flex line */}
+          <div className="flex items-center gap-2 md:contents">
+
           {/* Search */}
-          <div className="relative flex-1 max-w-[280px]">
+          <div className="relative flex-1 md:max-w-[280px]">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
             <input
               value={search}
@@ -251,13 +254,13 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
               e.target.value = '';
             }} />
 
-          {/* Upload dropdown */}
+          {/* Upload dropdown — label hidden on <md to keep the row narrow */}
           <div className="relative">
             <button
               onClick={() => { setShowUploadMenu(v => !v); setShowNewMenu(false); }}
               className="btn btn-md btn-secondary"
             >
-              <Upload size={13} /> {t('common.upload')} <ChevronDown size={11} />
+              <Upload size={13} /> <span className="hidden md:inline">{t('common.upload')}</span> <ChevronDown size={11} />
             </button>
             {showUploadMenu && (
               <div className="absolute right-0 mt-1 z-30 py-1 w-44 rounded-lg shadow-2xl shadow-black/60"
@@ -274,13 +277,13 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
             )}
           </div>
 
-          {/* New dropdown */}
+          {/* New dropdown — label hidden on <md */}
           <div className="relative">
             <button
               onClick={() => { setShowNewMenu(v => !v); setShowUploadMenu(false); }}
               className="btn btn-md btn-primary"
             >
-              <Plus size={13} /> {t('dashboard.new')} <ChevronDown size={11} />
+              <Plus size={13} /> <span className="hidden md:inline">{t('dashboard.new')}</span> <ChevronDown size={11} />
             </button>
             {showNewMenu && (
               <div className="absolute right-0 mt-1 z-30 py-1 w-44 rounded-lg shadow-2xl shadow-black/60"
@@ -296,6 +299,7 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
               </div>
             )}
           </div>
+          </div>{/* /mobile-only flex row (search + actions) */}
         </div>
 
         {/* Drag overlay */}
@@ -340,8 +344,9 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
             borderRadius: 'var(--radius-lg, 10px)',
           }}>
           {/* Column headers — uppercase microlabel row, slightly lifted bg
-              to mirror the JSX bg-2 separation. */}
-          <div className="grid items-center text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted"
+              to mirror the JSX bg-2 separation. Hidden on <md (rows there
+              use a card-style layout with name + meta sub-line). */}
+          <div className="hidden md:grid items-center text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted"
             style={{
               gridTemplateColumns: '2.5rem 1fr 7rem 7rem 5rem 2.25rem',
               padding: '10px 18px',
@@ -585,11 +590,10 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
 
   return (
     <div
-      className={`group grid items-center text-[13px] transition-colors ${
+      className={`group grid items-center text-[13px] transition-colors grid-cols-[2.5rem_1fr_2.25rem] md:grid-cols-[2.5rem_1fr_7rem_7rem_5rem_2.25rem] ${
         clickable ? 'hover:bg-bg-hover cursor-pointer' : ''
       } ${dragOver ? 'bg-accent/15 ring-2 ring-accent/50' : ''}`}
       style={{
-        gridTemplateColumns: '2.5rem 1fr 7rem 7rem 5rem 2.25rem',
         padding: '11px 18px',
         gap: 12,
         borderTop: '1px solid var(--color-border-subtle)',
@@ -650,25 +654,34 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
                 shared by <span className="text-accent">@{sharedBy}</span>
               </span>
             )}
+            {/* Mobile-only meta sub-line — folds kernel/mtime/size under
+                the name since those columns are hidden on <md. */}
+            <span className="md:hidden text-[10px] text-text-muted truncate" style={{ marginTop: 2 }}>
+              {[
+                file.kernelspec ?? (file.is_dir ? null : (file.cell_count != null ? `${file.cell_count} cells` : null)),
+                file.modified ? formatRelative(file.modified) : null,
+                file.size != null ? formatSize(file.size) : null,
+              ].filter(Boolean).join(' · ') || '—'}
+            </span>
           </div>
         )}
       </div>
 
       {/* Kernel — from notebook metadata.kernelspec; "—" for non-notebooks
           and notebooks that never recorded a kernel. */}
-      <span className="text-text-muted truncate" style={{ fontSize: 12 }} title={file.kernelspec ?? undefined}>
+      <span className="hidden md:inline text-text-muted truncate" style={{ fontSize: 12 }} title={file.kernelspec ?? undefined}>
         {file.kernelspec
           ?? (file.is_dir ? '' : (file.cell_count != null ? `${file.cell_count} cells` : '—'))}
       </span>
 
       {/* Modified — relative time from mtime */}
-      <span className="text-text-muted" style={{ fontSize: 12 }}
+      <span className="hidden md:inline text-text-muted" style={{ fontSize: 12 }}
         title={file.modified ?? undefined}>
         {file.modified ? formatRelative(file.modified) : '—'}
       </span>
 
       {/* Size */}
-      <span className="text-text-muted" style={{ fontSize: 12 }}>{formatSize(file.size)}</span>
+      <span className="hidden md:inline text-text-muted" style={{ fontSize: 12 }}>{formatSize(file.size)}</span>
 
       {/* Kebab menu — dropdown rendered via portal so it escapes the table's
           overflow:hidden and doesn't get clipped on the bottom-most rows. */}
@@ -676,7 +689,7 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
         <button
           ref={buttonRef}
           onClick={toggleMenu}
-          className="p-1 rounded hover:bg-bg-elevated text-text-muted hover:text-text opacity-0 group-hover:opacity-100 transition-opacity"
+          className="p-1 rounded inline-flex items-center justify-center min-w-[36px] min-h-[36px] md:min-w-0 md:min-h-0 hover:bg-bg-elevated text-text-muted hover:text-text md:opacity-0 md:group-hover:opacity-100 transition-opacity"
           aria-label="More actions"
         >
           <MoreVertical size={14} />

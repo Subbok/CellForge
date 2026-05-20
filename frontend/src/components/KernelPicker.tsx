@@ -87,7 +87,7 @@ export function KernelPicker({ onSelect, onSkip, onCancel }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <div className="bg-bg-secondary/95 backdrop-blur-xl border border-border/60 rounded-2xl shadow-2xl shadow-black/40 w-[480px] max-h-[80vh] flex flex-col">
+      <div className="bg-bg-secondary/95 backdrop-blur-xl border border-border/60 rounded-2xl shadow-2xl shadow-black/40 w-[min(480px,calc(100vw-1.5rem))] max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="px-6 pt-6 pb-4 shrink-0 border-b border-border/30">
           <div className="flex items-center gap-3">

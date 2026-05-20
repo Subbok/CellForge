@@ -71,7 +71,7 @@ export function NotebookPicker({ onOpen }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-panel w-[520px] max-h-[80vh] flex flex-col">
+      <div className="modal-panel w-[min(520px,calc(100vw-1.5rem))] max-h-[80vh] flex flex-col">
         <div className="px-6 pt-6 pb-3 shrink-0">
           <h2 className="text-lg font-semibold text-text">Open a notebook</h2>
           <p className="text-xs text-text-muted mt-1">{dir}</p>

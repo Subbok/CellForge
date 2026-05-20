@@ -78,12 +78,14 @@ export function FFModalShell({
       <div
         onMouseDown={e => e.stopPropagation()}
         style={{
-          position: 'relative', width,
+          position: 'relative',
+          width: `min(${width}px, calc(100vw - 24px))`,
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
           background: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-lg, 10px)',
           boxShadow: '0 30px 80px rgba(0,0,0,0.6)',
-          overflow: 'hidden',
           animation: 'ff-modal-panel-in 200ms ease-out',
         }}
       >

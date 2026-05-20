@@ -63,17 +63,18 @@ export function FFNav({ user, currentStage, hasOpenNotebook, onNav, onLogout, on
       className="h-[52px] shrink-0 flex items-center gap-3 px-4 border-b"
       style={{ borderColor: 'var(--color-border-subtle)', background: 'var(--color-bg)' }}
     >
-      {/* Brand — clicking goes home */}
+      {/* Brand — clicking goes home. Wordmark hidden on <sm so the mark
+          alone identifies the app on phone-width viewports. */}
       <button
         onClick={() => onNav('home')}
         className="flex items-center gap-2 pr-3 mr-1"
         title={t('nav.home')}
       >
         <BrandMark size={22} className="text-text" />
-        <Wordmark className="text-[15px]" />
+        <Wordmark className="text-[15px] hidden sm:inline" />
       </button>
 
-      {/* Nav items */}
+      {/* Nav items — labels hidden on <md, icons stay (title for hover hint) */}
       <nav className="flex items-center gap-0.5">
         {items.filter(it => it.visible).map(it => {
           const active = currentStage === it.id;
@@ -83,7 +84,7 @@ export function FFNav({ user, currentStage, hasOpenNotebook, onNav, onLogout, on
               key={it.id}
               disabled={!it.enabled}
               onClick={() => it.enabled && onNav(it.id)}
-              className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13px] font-medium transition-colors
+              className={`flex items-center gap-1.5 h-8 px-2 md:px-3 rounded-lg text-[13px] font-medium transition-colors
                 ${active
                   ? 'bg-bg-hover text-text'
                   : it.enabled
@@ -92,7 +93,7 @@ export function FFNav({ user, currentStage, hasOpenNotebook, onNav, onLogout, on
               title={it.enabled ? it.label : `${it.label} — ${t('nav.openANotebookFirst')}`}
             >
               <Icon size={14} />
-              {it.label}
+              <span className="hidden md:inline">{it.label}</span>
             </button>
           );
         })}
@@ -137,7 +138,7 @@ export function FFNav({ user, currentStage, hasOpenNotebook, onNav, onLogout, on
                 {initial}
               </span>
             )}
-          <span className="text-[12px] text-text-secondary max-w-[12ch] truncate">{displayName}</span>
+          <span className="hidden sm:inline text-[12px] text-text-secondary max-w-[12ch] truncate">{displayName}</span>
         </button>
         {menuOpen && (
           <div

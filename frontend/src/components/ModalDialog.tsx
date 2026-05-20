@@ -72,7 +72,7 @@ export function ModalProvider({ children }: { children: ReactNode }) {
       {children}
       {state.open && (
         <div className="modal-backdrop" onClick={() => close(state.kind === 'confirm' ? false : null)}>
-          <div className="modal-panel w-[400px] p-6" onClick={e => e.stopPropagation()}>
+          <div className="modal-panel w-[min(400px,calc(100vw-1.5rem))] p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-start gap-3 mb-4">
               <div className="shrink-0 mt-0.5">{iconEl}</div>
               <div className="flex-1 min-w-0">

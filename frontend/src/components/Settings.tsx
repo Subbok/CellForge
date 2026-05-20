@@ -67,13 +67,42 @@ export function Settings({ user }: Props) {
     { id: 'about',      label: t('settings.secAbout'),      visible: true },
   ];
 
+  const visibleSections = sections.filter(s => s.visible);
+
   return (
-    <div className="h-full flex overflow-hidden" style={{
+    <div className="h-full flex flex-col md:flex-row overflow-hidden" style={{
       background: 'var(--color-bg)',
-      zoom: 1.15,
     }}>
-      {/* Left sidebar — section nav */}
-      <aside style={{
+      {/* Mobile — horizontal tab strip above main */}
+      <nav className="md:hidden flex items-center gap-1 overflow-x-auto shrink-0"
+        style={{
+          background: 'var(--color-bg-secondary)',
+          borderBottom: '1px solid var(--color-border)',
+          padding: '8px 12px',
+        }}
+      >
+        {visibleSections.map(s => {
+          const isActive = active === s.id;
+          return (
+            <button
+              key={s.id}
+              onClick={() => setActive(s.id)}
+              className="shrink-0 transition-colors"
+              style={{
+                padding: '6px 12px', borderRadius: 6, fontSize: 12,
+                color: isActive ? 'var(--color-text)' : 'var(--color-text-secondary)',
+                background: isActive ? 'var(--color-bg-hover)' : 'transparent',
+                border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+            >
+              {s.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Desktop — left sidebar section nav */}
+      <aside className="hidden md:block" style={{
         width: 240, flexShrink: 0,
         background: 'var(--color-bg-secondary)',
         borderRight: '1px solid var(--color-border)',
@@ -86,7 +115,7 @@ export function Settings({ user }: Props) {
         }}>
           {t('settings.title')}
         </div>
-        {sections.filter(s => s.visible).map(s => {
+        {visibleSections.map(s => {
           const isActive = active === s.id;
           return (
             <button
@@ -111,7 +140,7 @@ export function Settings({ user }: Props) {
       </aside>
 
       {/* Right pane — selected section */}
-      <main className="flex-1 overflow-auto" style={{ padding: '32px 40px' }}>
+      <main className="flex-1 overflow-auto" style={{ padding: 'clamp(16px, 4vw, 32px) clamp(16px, 4vw, 40px)' }}>
         <div style={{ maxWidth: 760 }}>
           {active === 'profile'    && <ProfilePane user={user} />}
           {active === 'appearance' && <AppearancePane isAdmin={!!user?.is_admin} />}
