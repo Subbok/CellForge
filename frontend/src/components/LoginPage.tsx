@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { BrandMark } from './brand/BrandMark';
@@ -21,10 +21,16 @@ function FFField({
   placeholder?: string;
   mono?: boolean;
 }) {
+  // Per-instance id so each <label htmlFor=…> binds to its own <input id=…>.
+  // Without this, getByRole('textbox', { name: '…' }) — which the E2E suite
+  // and screen readers both rely on — can't associate the visible label with
+  // its control. useId is React-stable across SSR/CSR and unique per call site.
+  const inputId = useId();
   return (
     <div>
-      <label className="block text-[12px] text-text-secondary mb-1.5">{label}</label>
+      <label htmlFor={inputId} className="block text-[12px] text-text-secondary mb-1.5">{label}</label>
       <input
+        id={inputId}
         type={type ?? 'text'}
         value={value}
         autoFocus={autoFocus}

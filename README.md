@@ -52,7 +52,7 @@ Or grab a binary from [Releases](../../releases):
 | Windows x64 | `cellforge-windows-x64.exe` | `cellforge-windows-x64-desktop.exe` |
 | Windows ARM64 | `cellforge-windows-arm64.exe` | `cellforge-windows-arm64-desktop.exe` |
 
-**Server** opens in your browser at http://localhost:8888. Single portable file with the frontend and Typst compiler embedded (~30 MB). **Desktop** is a native window (Linux AppImage, macOS .dmg, Windows .exe) — same features, no browser needed.
+**Server** opens in your browser at http://localhost:8888. Single portable file with the frontend and Typst compiler embedded (~60 MB stripped). **Desktop** is a native window (Linux AppImage, macOS .dmg, Windows .exe) — same features, no browser needed.
 
 You need at least one Jupyter kernel installed: `pip install ipykernel`
 
@@ -69,7 +69,7 @@ You need at least one Jupyter kernel installed: `pip install ipykernel`
 - **Per-kernel sandboxing** — each kernel runs in a bubblewrap jail with mount, PID, and network isolation on Linux; graceful fallback when kernel namespaces are unavailable (Docker default, restricted hosts). [Docs](https://github.com/Subbok/CellForge/wiki/Deployment-Security)
 - **Multi-user** — SQLite accounts, JWT auth with session invalidation, bcrypt with constant-time fallback, per-user workspaces, file sharing with live collab, admin panel, per-group resource limits. Single binary, no JupyterHub.
 
-CellForge ships as a ~30 MB binary. Compare: JupyterLab (~150 MB) + TeX Live for PDF export (~2-4 GB).
+CellForge ships as a ~60 MB stripped binary. Compare: JupyterLab (~150 MB) + TeX Live for PDF export (~2-4 GB).
 
 ---
 

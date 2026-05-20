@@ -222,34 +222,24 @@ pub async fn me(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    // Public endpoint — answers "who am I, or null if not logged in".
+    // Returns 200 in every case (with `ok:false` when there's no valid
+    // cookie) so the browser's network panel doesn't show a 401 on every
+    // page load before login, which is just noise — actual access control
+    // for sensitive routes is enforced by the require_auth middleware.
     let username = extract_user(&headers);
-    match username {
-        Some(name) => match state.users.get_user(&name) {
-            Ok(user) => Json(AuthResponse {
-                ok: true,
-                error: None,
-                user: Some(user),
-            })
-            .into_response(),
-            Err(_) => (
-                StatusCode::UNAUTHORIZED,
-                Json(AuthResponse {
-                    ok: false,
-                    error: Some("session expired".into()),
-                    user: None,
-                }),
-            )
-                .into_response(),
-        },
-        None => (
-            StatusCode::UNAUTHORIZED,
-            Json(AuthResponse {
-                ok: false,
-                error: Some("not logged in".into()),
-                user: None,
-            }),
-        )
-            .into_response(),
+    let user = username.and_then(|name| state.users.get_user(&name).ok());
+    match user {
+        Some(u) => Json(AuthResponse {
+            ok: true,
+            error: None,
+            user: Some(u),
+        }),
+        None => Json(AuthResponse {
+            ok: false,
+            error: None,
+            user: None,
+        }),
     }
 }
 

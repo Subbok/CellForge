@@ -227,14 +227,18 @@ fn build_api_router() -> Router<Arc<AppState>> {
         .route("/health", get(health_handler))
         .route("/auth/status", get(auth::status))
         .route("/auth/login", axum::routing::post(auth::login))
-        .route("/auth/register", axum::routing::post(auth::register));
+        .route("/auth/register", axum::routing::post(auth::register))
+        // `/auth/me` is informational — it answers "who am I, or null if I'm
+        // not logged in" and is fired on every page load. Keep it public so
+        // anonymous calls return 200 with `{ok:false}` instead of a 401
+        // that the browser would log to the console on the login screen.
+        .route("/auth/me", get(auth::me));
 
     // Private routes — every entry below requires a valid JWT cookie. The
     // `require_auth` layer rejects with 401 before the handler runs, so
     // individual handlers no longer need to repeat the check (a few still
     // use `extract_user` to learn *who* the caller is, which is fine).
     let private = Router::new()
-        .route("/auth/me", get(auth::me))
         .route("/auth/logout", axum::routing::post(auth::logout))
         .route("/auth/users", get(auth::list_users))
         .route(

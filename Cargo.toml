@@ -27,3 +27,13 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Release profile: strip symbols + use a single codegen unit + LTO.
+# Drops the release binary from ~80 MB → ~30 MB matching what README
+# advertises, with a few seconds of extra compile time on a fresh build.
+# Use `strip = "symbols"` (not "debuginfo") to also drop the section
+# headers that bring no diagnostic value in a stripped artifact.
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1

@@ -124,33 +124,41 @@ function App() {
   // itself, before any user plugins load. One-shot on mount.
   useEffect(() => { registerBuiltinRenderers(); }, []);
 
-  // One-shot plugin loader on mount: pulls /api/plugins + /api/plugins/config,
-  // seeds uiStore, then dynamic-imports every plugin's JS module so their
-  // MIME renderers are available when notebook outputs start flowing.
+  // Plugin loader runs once the user has authenticated. Pulls /api/plugins
+  // + /api/plugins/config, seeds uiStore, then dynamic-imports every plugin's
+  // JS module so their MIME renderers are available when notebook outputs
+  // start flowing. Gated on `user` so the login screen doesn't fire two
+  // requests that auth-middleware will just 401 — those 401s used to show
+  // up as console errors that looked like real problems on a fresh load.
   const setPlugins = useUIStore(s => s.setPlugins);
   const setAllowUserPlugins = useUIStore(s => s.setAllowUserPlugins);
   const setIsAdmin = useUIStore(s => s.setIsAdmin);
   useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
     (async () => {
       let pluginList: import('./plugins/types').PluginEntry[] = [];
       try {
         pluginList = await api.listPlugins();
+        if (cancelled) return;
         setPlugins(pluginList);
       } catch (e) {
         console.warn('plugin list fetch failed:', e);
       }
       try {
         const cfg = await api.getPluginConfig();
+        if (cancelled) return;
         setAllowUserPlugins(cfg.allow_user_plugins);
       } catch (e) {
         console.warn('plugin config fetch failed:', e);
       }
       // load frontend JS modules from plugins that declare widgets
-      if (pluginList.length > 0) {
+      if (!cancelled && pluginList.length > 0) {
         await loadPluginModules(pluginList);
       }
     })();
-  }, [setPlugins, setAllowUserPlugins]);
+    return () => { cancelled = true; };
+  }, [user, setPlugins, setAllowUserPlugins]);
 
   // Keep `isAdmin` in the store in sync with the currently-authenticated user,
   // so plugin admin surfaces can flip visibility without threading user props.
