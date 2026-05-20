@@ -330,6 +330,28 @@ fn build_sandbox_wrapper(
         config_dir.display().to_string(),
     ]);
 
+    // Re-expose GPU device nodes so PyTorch / TensorFlow / JAX kernels
+    // can actually talk to the hardware. bubblewrap's `--dev /dev` above
+    // only ships the standard minimal set (null/zero/random/tty etc.) —
+    // every other character device is invisible inside the sandbox, which
+    // is what we want for security, but a CUDA kernel inside that sandbox
+    // sees `torch.cuda.is_available() == False` and silently falls back
+    // to CPU. `--dev-bind-try` no-ops cleanly on hosts without the device,
+    // so this is safe to include unconditionally. Covers NVIDIA (CUDA),
+    // /dev/dri (integrated GPUs, AMD ROCm), and Intel KFD compute.
+    if let Ok(entries) = std::fs::read_dir("/dev") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let n = name.to_string_lossy();
+            if n.starts_with("nvidia") || n == "dri" || n == "kfd" {
+                let path = format!("/dev/{n}");
+                args.push("--dev-bind-try".into());
+                args.push(path.clone());
+                args.push(path);
+            }
+        }
+    }
+
     // Re-expose built-in Python helpers (cellforge_ui, cellforge) read-only.
     let builtin_pylib = cellforge_config::pylib_dir();
     if builtin_pylib.is_dir() {
@@ -459,6 +481,21 @@ pub async fn launch_kernel(
     let new_pythonpath = parts.join(path_sep);
     cmd.env("PYTHONPATH", &new_pythonpath);
     tracing::debug!("kernel PYTHONPATH = {}", new_pythonpath);
+
+    // Redirect every common library cache/config dir into the sandbox's
+    // ephemeral /tmp tmpfs. Without this, matplotlib / huggingface / torch /
+    // IPython all try to write to ~/.config/<lib> or ~/.cache/<lib>, hit the
+    // sandbox's read-only root filesystem (see `--ro-bind / /` in
+    // `bwrap_argv`), and either crash or rebuild their cache on every
+    // single import. Set the same env vars even in the no-sandbox path —
+    // they're harmless there and stop server-process-owned cache files
+    // from cluttering the operator's home directory.
+    cmd.env("MPLCONFIGDIR", "/tmp/.cache/matplotlib")
+        .env("XDG_CACHE_HOME", "/tmp/.cache")
+        .env("XDG_CONFIG_HOME", "/tmp/.config")
+        .env("HF_HOME", "/tmp/.cache/huggingface")
+        .env("TORCH_HOME", "/tmp/.cache/torch")
+        .env("IPYTHONDIR", "/tmp/.ipython");
 
     // run the kernel in the notebook's directory so relative file ops
     // (np.savez, open('data.csv', 'w'), matplotlib savefig, etc.) land there
