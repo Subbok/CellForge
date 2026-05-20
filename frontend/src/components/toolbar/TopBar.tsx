@@ -90,10 +90,14 @@ export function TopBar({ onExport, onSwitchKernel }: {
   // Track last successful save so we can surface "Saved 12s ago" in the
   // header chip — matches the JSX baseline.
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [savedTick, setSavedTick] = useState(0);
+  // `nowMs` is bumped from the interval below so `savedAgoLabel` can read it
+  // instead of calling `Date.now()` in render. react-hooks/purity forbids
+  // impure calls in the render path; sampling the clock from an effect and
+  // reading a state value during render is the supported alternative.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     if (!savedAt) return;
-    const id = setInterval(() => setSavedTick(t => t + 1), 30_000);
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
     return () => clearInterval(id);
   }, [savedAt]);
 
@@ -164,14 +168,16 @@ export function TopBar({ onExport, onSwitchKernel }: {
       })),
     });
     useNotebookStore.setState({ dirty: false });
-    setSavedAt(Date.now());
+    const now = Date.now();
+    setSavedAt(now);
+    setNowMs(now); // align with savedAt so the chip immediately shows "Saved 0s ago" instead of the stale interval tick
     broadcastSaved();
   }
 
   function savedAgoLabel(): string {
     if (dirty) return 'Unsaved';
     if (!savedAt) return 'Saved';
-    const diff = Date.now() - savedAt + savedTick * 0; // touch tick so re-renders pick up
+    const diff = nowMs - savedAt;
     const seconds = Math.floor(diff / 1000);
     if (seconds < 60) return `Saved ${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);

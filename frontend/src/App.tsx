@@ -82,6 +82,11 @@ function pickAccentFg(hex: string): string {
   return y > 150 ? '#0c0d13' : '#ffffff';
 }
 
+// Stable empty array for the "no user → no recent notebooks" derived branch.
+// Sharing one identity across renders means consumers using === checks don't
+// see spurious diffs on every render while logged out.
+const EMPTY_RECENT: { file_path: string; last_opened: string }[] = [];
+
 function App() {
   const { t } = useTranslation();
   const [stage, setStageRaw] = useState<Stage>('loading');
@@ -316,11 +321,19 @@ function App() {
   // present and whenever they navigate back to home — small payload, fine to
   // refetch lazily rather than syncing through a global store.
   useEffect(() => {
-    if (!user) { setRecentNotebooks([]); return; }
+    if (!user) return;
+    // Cancellation guard so a slow getDashboard from a previous user can't
+    // overwrite the new user's recent list after they log back in.
+    let cancelled = false;
     api.getDashboard()
-      .then(d => setRecentNotebooks(d.recent_notebooks))
+      .then(d => { if (!cancelled) setRecentNotebooks(d.recent_notebooks); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [user, stage]);
+  // Derive empty when logged out instead of resetting state in the effect
+  // body — react-hooks/set-state-in-effect rule. Reuses the same `[]` ref
+  // so consumers don't re-render on identity churn.
+  const visibleRecent = user ? recentNotebooks : EMPTY_RECENT;
 
   // Global ⌘K / Ctrl+K toggle for the command palette.
   useEffect(() => {
@@ -537,7 +550,7 @@ function App() {
                 : stage === 'admin' ? 'admin'
                   : 'home'
         }
-        recent={recentNotebooks}
+        recent={visibleRecent}
         onNav={handleNav}
         onLogout={handleLogout}
         onOpenNotebook={(path, nb) => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileText, Plus, FolderOpen } from 'lucide-react';
 import { api } from '../services/api';
@@ -112,44 +112,57 @@ export function HomeDashboard({ onOpenNotebook, onBrowseFiles }: Props) {
   const [error, setError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
-  const loadDashboard = useCallback(async () => {
-    try {
-      const d = await api.getDashboard();
-      setData(d);
-      setKernels(d.running_kernels.map(k => ({
-        id: k.id, kernel_spec: k.kernel_spec, language: k.language,
-        notebook_path: k.notebook_path, status: k.status, memory_mb: k.memory_mb,
-        started_at: k.started_at,
-      })));
-      setError('');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const pollKernels = useCallback(async () => {
-    try {
-      const ks = await api.getDashboardKernels();
-      setKernels(ks);
-    } catch { /* ignored */ }
-  }, []);
-
-  const loadActivity = useCallback(async () => {
-    try { setEvents(await api.getActivity()); }
-    catch { /* feed is optional, don't propagate */ }
-  }, []);
-
   useEffect(() => {
+    // Loaders inlined here (instead of useCallback at component scope) so
+    // react-hooks/set-state-in-effect can see that every setState happens
+    // *after* an `await`, not synchronously in the effect body. The functions
+    // weren't used anywhere else in the component, so nothing else loses
+    // access to them.
+    let cancelled = false;
+
+    const loadDashboard = async () => {
+      try {
+        const d = await api.getDashboard();
+        if (cancelled) return;
+        setData(d);
+        setKernels(d.running_kernels.map(k => ({
+          id: k.id, kernel_spec: k.kernel_spec, language: k.language,
+          notebook_path: k.notebook_path, status: k.status, memory_mb: k.memory_mb,
+          started_at: k.started_at,
+        })));
+        setError('');
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    const pollKernels = async () => {
+      try {
+        const ks = await api.getDashboardKernels();
+        if (!cancelled) setKernels(ks);
+      } catch { /* ignored */ }
+    };
+
+    const loadActivity = async () => {
+      try {
+        const ev = await api.getActivity();
+        if (!cancelled) setEvents(ev);
+      } catch { /* feed is optional, don't propagate */ }
+    };
+
     loadDashboard();
     loadActivity();
     pollRef.current = setInterval(() => {
       pollKernels();
       loadActivity();
     }, 5000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [loadDashboard, loadActivity, pollKernels]);
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   async function openRecent(path: string) {
     try { const nb = await api.getNotebook(path); onOpenNotebook(path, nb); }

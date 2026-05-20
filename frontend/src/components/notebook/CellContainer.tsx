@@ -263,7 +263,7 @@ export const CellContainer = memo(function CellContainer({ cell, index }: { cell
           <div>
             {!appMode && !codeCollapsed && (
               <div style={{ background: 'var(--color-bg-elevated)' }}>
-                <CodeCell cell={cell} index={index} />
+                <CodeCell cell={cell} />
               </div>
             )}
             {!appMode && codeCollapsed && (

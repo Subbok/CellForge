@@ -15,7 +15,7 @@ import type { Cell } from '../../lib/types';
 import { useCallback, useRef, useEffect } from 'react';
 import type { editor, IKeyboardEvent } from 'monaco-editor';
 
-export function CodeCell({ cell, index }: { cell: Cell; index: number }) {
+export function CodeCell({ cell }: { cell: Cell }) {
   const updateSource = useNotebookStore(s => s.updateSource);
   const execute = useExecuteCell();
   const searchQuery = useUIStore(s => s.searchQuery);

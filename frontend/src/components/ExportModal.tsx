@@ -54,6 +54,14 @@ export function ExportModal({ onClose }: Props) {
       }
     }
 
+    // Reset vars to the template's defaults whenever the user picks a
+    // different template — but keep any per-key edits the user already made
+    // (the `prev[v.key] ?? v.default_value` line). This is one of the
+    // documented "OK" patterns for setState-in-effect (deriving state from
+    // an async-loaded prop where input-state must persist across changes),
+    // and refactoring to useReducer/key-remount would be heavier than the
+    // problem warrants.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setVars(prev => {
       const newVars: Record<string, string> = {};
       for (const v of tmpl.variables) {
@@ -110,15 +118,21 @@ export function ExportModal({ onClose }: Props) {
         })),
       };
 
-      // auto-generate course-short from course-full (first letters)
-      if (vars['course-full'] && !vars['course-short']) {
-        vars['course-short'] = vars['course-full']
-          .split(/\s+/)
-          .map(w => w[0]?.toUpperCase() ?? '')
-          .join('');
-      }
+      // auto-generate course-short from course-full (first letters).
+      // Build a new object instead of mutating `vars` in place — `vars` is
+      // React state and writing to it directly skips the setter and trips
+      // react-hooks/refs (and breaks any future change-detection).
+      const finalVars = vars['course-full'] && !vars['course-short']
+        ? {
+            ...vars,
+            'course-short': vars['course-full']
+              .split(/\s+/)
+              .map(w => w[0]?.toUpperCase() ?? '')
+              .join(''),
+          }
+        : vars;
 
-      const blob = await api.exportPdf(nb, selected, vars);
+      const blob = await api.exportPdf(nb, selected, finalVars);
       const name = filePath?.split('/').pop()?.replace('.ipynb', '') ?? 'notebook';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

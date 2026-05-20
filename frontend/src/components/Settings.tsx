@@ -653,16 +653,17 @@ const ACCENT_SWATCHES: AccentSwatch[] = [
 
 function AccentPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
   const { t } = useTranslation();
-  const [draft, setDraft] = useState(value);
-
-  // keep draft in sync when an outside update lands (e.g. swatch click)
-  useEffect(() => { setDraft(value); }, [value]);
+  // `userEdits === null` means "show the live `value` prop"; any other string
+  // means the user is mid-typing in the hex field. Derived `draft` avoids
+  // the prop-sync useEffect that react-hooks/set-state-in-effect rejects.
+  const [userEdits, setUserEdits] = useState<string | null>(null);
+  const draft = userEdits ?? value;
 
   function commitDraft() {
     const v = draft.trim();
     const hex = v.startsWith('#') ? v : `#${v}`;
     if (/^#[0-9a-fA-F]{6}$/.test(hex)) onChange(hex.toLowerCase());
-    else setDraft(value); // reset on invalid input
+    setUserEdits(null); // either committed → `value` updates → derived again, or invalid → reset
   }
 
   return (
@@ -701,7 +702,7 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (hex: stri
           />
           <input
             value={draft}
-            onChange={e => setDraft(e.target.value)}
+            onChange={e => setUserEdits(e.target.value)}
             onBlur={commitDraft}
             onKeyDown={e => { if (e.key === 'Enter') commitDraft(); }}
             placeholder="#a78bfa"
@@ -923,13 +924,14 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
   const canInstallSystem = isAdminProp;
   const canInstallAny = canInstallUser || canInstallSystem;
 
-  useEffect(() => {
-    if (!canInstallUser && canInstallSystem && uploadScope !== 'system') {
-      setUploadScope('system');
-    } else if (!canInstallSystem && canInstallUser && uploadScope !== 'user') {
-      setUploadScope('user');
-    }
-  }, [canInstallUser, canInstallSystem, uploadScope]);
+  // Derived "effective" scope — force `system` / `user` when the user only
+  // has one permission. Beats syncing `uploadScope` via a setState-in-effect
+  // (which the new react-hooks rule rejects) and makes intent obvious.
+  const effectiveScope: PluginScope = (!canInstallUser && canInstallSystem)
+    ? 'system'
+    : (!canInstallSystem && canInstallUser)
+    ? 'user'
+    : uploadScope;
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -937,7 +939,7 @@ function PluginsSection({ isAdminProp }: { isAdminProp: boolean }) {
     setError('');
     setUploading(true);
     try {
-      await api.uploadPlugin(file, uploadScope);
+      await api.uploadPlugin(file, effectiveScope);
       await refreshPlugins();
     } catch (err: unknown) {
       setError(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);

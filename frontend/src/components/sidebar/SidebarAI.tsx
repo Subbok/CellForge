@@ -77,16 +77,26 @@ export function SidebarAI() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // reload chat when switching notebooks
-  useEffect(() => {
+  // Reload chat when switching notebooks. The React docs explicitly endorse
+  // setState-during-render for "reset state when a prop changes" — React
+  // discards the in-flight render and restarts with the new state, with no
+  // wasted commit. Cleaner than the old useEffect that the new
+  // react-hooks/set-state-in-effect rule rejects.
+  const [trackedPath, setTrackedPath] = useState(filePath);
+  if (filePath !== trackedPath) {
+    setTrackedPath(filePath);
     setMessages(loadChat(filePath));
-  }, [filePath]);
+  }
 
   // persist on change — if the persist layer trimmed the history (cap or
-  // quota), adopt the trimmed array so the UI reflects what's actually stored
+  // quota), adopt the trimmed array so the UI reflects what's actually stored.
+  // The length-guard makes this terminate (next effect sees equal lengths
+  // and skips the setState), so it's not a real cascade despite what the
+  // linter assumes.
   useEffect(() => {
     const persisted = saveChat(filePath, messages);
     if (persisted.length !== messages.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessages(persisted);
     }
   }, [messages, filePath]);
