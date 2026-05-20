@@ -112,9 +112,19 @@ export const api = {
   listUsers: () => get<AuthUser[]>('/auth/users'),
   deleteUser: (username: string) => fetch(`${BASE}/auth/users/${username}`, { method: 'DELETE' }),
   // file ops
-  uploadFiles: async (files: File[]) => {
+  uploadFiles: async (files: File[], destPath?: string) => {
+    // `destPath` is the workspace-relative folder the user is currently in
+    // (or dropped onto). Empty/undefined keeps the historic "upload to root"
+    // behaviour; otherwise we prefix every relative path so the multipart
+    // field name lands inside that folder. The backend already accepts
+    // sub-paths in the field name and creates intermediate dirs.
+    const cleanDest = destPath ? destPath.replace(/^\/+|\/+$/g, '') : '';
+    const prefix = cleanDest ? `${cleanDest}/` : '';
     const form = new FormData();
-    for (const f of files) form.append('file', f, f.webkitRelativePath || f.name);
+    for (const f of files) {
+      const rel = f.webkitRelativePath || f.name;
+      form.append('file', f, prefix + rel);
+    }
     await fetch(`${BASE}/files/upload`, { method: 'POST', body: form });
   },
   downloadFile: async (path: string) => {

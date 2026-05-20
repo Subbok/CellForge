@@ -102,7 +102,19 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
     setDragOver(false);
     const items = e.dataTransfer.files;
     if (!items.length) return;
-    await api.uploadFiles(Array.from(items));
+    // Drop onto empty area of the dashboard → upload to whatever folder the
+    // breadcrumbs say we're in. Drop onto a folder row goes through
+    // `dropOntoFolder` and uses that folder's path instead.
+    await api.uploadFiles(Array.from(items), cwd);
+    loadFiles();
+  }
+
+  // Drop handler routed from FileRow (folder rows only). Per-row state +
+  // stopPropagation in the child handler keep the dashboard-level zone from
+  // double-firing on the same drop.
+  async function dropOntoFolder(files: File[], folderPath: string) {
+    if (!files.length) return;
+    await api.uploadFiles(files, folderPath);
     loadFiles();
   }
 
@@ -228,13 +240,13 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
             {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
             onChange={async e => {
               const files = Array.from(e.target.files ?? []);
-              if (files.length) { await api.uploadFiles(files); loadFiles(); }
+              if (files.length) { await api.uploadFiles(files, cwd); loadFiles(); }
             }} />
           <input ref={uploadRef} type="file" accept=".ipynb,.zip" multiple className="hidden"
             onChange={async e => {
               const files = Array.from(e.target.files ?? []);
               if (!files.length) return;
-              try { await api.uploadFiles(files); loadFiles(); }
+              try { await api.uploadFiles(files, cwd); loadFiles(); }
               catch (err: unknown) { setError(err instanceof Error ? err.message : String(err)); }
               e.target.value = '';
             }} />
@@ -377,6 +389,7 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
                     try { await api.extractZip(f.path); loadFiles(); }
                     catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
                   } : undefined}
+                  onDropFiles={f.is_dir ? (files => dropOntoFolder(files, f.path)) : undefined}
                   onRename={async (newName) => {
                     try { await api.renameFile(f.path, newName); loadFiles(); }
                     catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
@@ -504,7 +517,7 @@ function formatRelative(iso: string): string {
   return new Date(normalized).toLocaleDateString();
 }
 
-function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownload, selected, onSelect, sharedBy }: {
+function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownload, selected, onSelect, sharedBy, onDropFiles }: {
   file: FileEntry;
   onOpen: () => void;
   onRename?: (newName: string) => void;
@@ -515,17 +528,22 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
   selected?: boolean;
   onSelect?: () => void;
   sharedBy?: string;
+  /** Active only when the row represents a folder; called with the dropped
+   *  File list so the parent can route the upload into THIS folder. */
+  onDropFiles?: (files: File[]) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(file.name);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const isNotebook = file.name.endsWith('.ipynb');
   const isData = /\.(csv|tsv|json|jsonl|ndjson|parquet|pq)$/i.test(file.name);
   const clickable = file.is_dir || isNotebook || isData;
+  const isFolderDropTarget = file.is_dir && !!onDropFiles;
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -569,7 +587,7 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
     <div
       className={`group grid items-center text-[13px] transition-colors ${
         clickable ? 'hover:bg-bg-hover cursor-pointer' : ''
-      }`}
+      } ${dragOver ? 'bg-accent/15 ring-2 ring-accent/50' : ''}`}
       style={{
         gridTemplateColumns: '2.5rem 1fr 7rem 7rem 5rem 2.25rem',
         padding: '11px 18px',
@@ -577,6 +595,23 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
         borderTop: '1px solid var(--color-border-subtle)',
       }}
       onClick={() => clickable && !editing && onOpen()}
+      onDragOver={isFolderDropTarget ? (e => {
+        // Only opt-in to the drop when files are being dragged; stop the
+        // event from bubbling to the dashboard-level drop zone so we don't
+        // double-upload (folder + cwd) on the same drop.
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(true);
+      }) : undefined}
+      onDragLeave={isFolderDropTarget ? (() => setDragOver(false)) : undefined}
+      onDrop={isFolderDropTarget ? (e => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOver(false);
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length) onDropFiles!(files);
+      }) : undefined}
     >
       {/* Checkbox */}
       <div className="flex items-center justify-center" onClick={e => e.stopPropagation()}>
