@@ -1049,10 +1049,58 @@ async fn handle_client_msg(
             }
         }
         protocol::RESTART_KERNEL => {
-            let kid = kernel_id_for_language(sess, &sess.default_language).await;
-            if let Some(ref kid) = kid {
-                let mut km = state.kernels.lock().await;
-                let _ = km.restart(kid).await;
+            // Full restart pipeline. Previously this just called km.restart()
+            // (which is stop + start) but left every session-level mapping
+            // pointing at the OLD kernel id — frontend's ws stayed bound to
+            // a kernel that no longer existed and the user got the "restart
+            // didn't actually do anything" experience. Now we:
+            //   1. abort all forwarding tasks so stale iopub from the dying
+            //      kernel never reaches the client
+            //   2. drop the session's reference to this language kernel
+            //   3. drop the shared-notebook mapping so a fresh subscriber
+            //      lazy-spawns instead of reusing the dying id
+            //   4. stop the kernel via control-channel shutdown (1.4.3)
+            //   5. clear the DB row so the dashboard kernels list catches up
+            //   6. send idle status to the client so the UI flips cleanly
+            // The next execute_request (or ws.reconnect on the frontend)
+            // re-runs ensure_kernel_for_language → start_new_kernel →
+            // subscribe_session_to_kernel and the user gets a fresh kernel.
+            let lang = sess.default_language.clone();
+            let kid = kernel_id_for_language(sess, &lang).await;
+            if let Some(kid) = kid {
+                for handle in sess.forwarding_handles.lock().await.drain(..) {
+                    handle.abort();
+                }
+                sess.kernels.lock().await.remove(&lang);
+                sess.kernel_states.lock().await.remove(&lang);
+                if let Some(ref nb_key) = sess.notebook_canonical {
+                    let mut map = state.notebook_kernels.lock().await;
+                    if let Some(inner) = map.get_mut(nb_key) {
+                        if inner.get(&lang).map(|id| id == &kid).unwrap_or(false) {
+                            inner.remove(&lang);
+                        }
+                        if inner.is_empty() {
+                            map.remove(nb_key);
+                        }
+                    }
+                }
+                {
+                    let mut km = state.kernels.lock().await;
+                    let _ = km.stop(&kid).await;
+                }
+                let _ = state.users.remove_kernel_session(&kid);
+                let mut tx = sess.ws_tx.lock().await;
+                let _ = send_json(
+                    &mut *tx,
+                    &WsMessage {
+                        msg_type: protocol::KERNEL_STATUS.into(),
+                        id: msg.id.clone(),
+                        session_id: None,
+                        payload: serde_json::json!({ "execution_state": "idle" }),
+                    },
+                )
+                .await;
+                tracing::info!("kernel {kid} ({lang}) restarted — next execute will spawn fresh");
             }
         }
         protocol::COMPLETE_REQUEST => {
