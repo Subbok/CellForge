@@ -157,10 +157,13 @@ function sanitizeViz(data: unknown): VizData | null {
       .map((v: unknown) => (typeof v === 'number' ? v : Number(v)))
       .filter((n: number) => Number.isFinite(n));
   }
-  if ('labels' in out) {
-    const ls = Array.isArray(out.labels) ? out.labels : [];
-    out.labels = ls.map((l: unknown) => (l == null ? '' : String(l)));
-  }
+  // Labels are optional in the Python API (`cf.line(values)` is valid without
+  // them) but every renderer reads `labels[i]` unconditionally. Always set
+  // labels to an array — empty if the caller omitted it — so the renderers
+  // can keep their concise `${esc(labels[i] ?? '')}` pattern without crashing
+  // with "Cannot read properties of undefined".
+  const ls = Array.isArray(out.labels) ? out.labels : [];
+  out.labels = ls.map((l: unknown) => (l == null ? '' : String(l)));
 
   return out as unknown as VizData;
 }

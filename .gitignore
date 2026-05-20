@@ -40,9 +40,9 @@ cellforge_debug.typ
 __pycache__/
 *.pyc
 
-# Screenshots (but not assets/)
+# Screenshots (but not assets/, including nested folders like assets/readme/)
 *.png
-!assets/*.png
+!assets/**/*.png
 Dockerfile.server.build
 
 # Wiki — checked out as a nested repo for editing, not part of this repo
