@@ -279,7 +279,9 @@ fn parse_wire_msg(frames: &[Vec<u8>], key: &[u8]) -> Result<JupyterMessage> {
 /// Replaces a hardcoded "2025-01-01T00:00:00.000Z" that used to flow into
 /// every message regardless of when the request was actually sent.
 fn now_ish() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
 }
 
 #[cfg(test)]

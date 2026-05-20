@@ -47,10 +47,7 @@ fn secret() -> &'static [u8] {
                 );
             }
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                panic!(
-                    "could not read jwt_secret at {}: {e}",
-                    key_path.display()
-                );
+                panic!("could not read jwt_secret at {}: {e}", key_path.display());
             }
             Err(_) => {} // NotFound — generate below
         }
@@ -73,7 +70,10 @@ fn secret() -> &'static [u8] {
         ));
 
         if let Err(e) = std::fs::write(&tmp_path, &key) {
-            tracing::error!("could not stage jwt_secret tmp at {}: {e}", tmp_path.display());
+            tracing::error!(
+                "could not stage jwt_secret tmp at {}: {e}",
+                tmp_path.display()
+            );
             return key;
         }
         #[cfg(unix)]
