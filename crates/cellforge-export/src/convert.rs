@@ -12,6 +12,26 @@ pub fn notebook_to_typst(
     let mut images: HashMap<String, String> = HashMap::new();
     let mut img_counter = 0;
 
+    // Notebook-level language — `language_info.name` is the canonical Jupyter
+    // field, `kernelspec.language` is the fallback. Default to `python`
+    // because that's what the lab uses most and Typst's raw-block highlighter
+    // recognises it. Used as the fenced-code language for every code cell —
+    // the user shouldn't see "python" on an R/Julia/JS notebook.
+    let notebook_lang = notebook
+        .metadata
+        .language_info
+        .as_ref()
+        .map(|l| l.name.as_str())
+        .or_else(|| {
+            notebook
+                .metadata
+                .kernelspec
+                .as_ref()
+                .and_then(|k| k.language.as_deref())
+        })
+        .unwrap_or("python")
+        .to_string();
+
     for cell in &notebook.cells {
         match cell {
             Cell::Markdown(md) => {
@@ -21,7 +41,29 @@ pub fn notebook_to_typst(
             Cell::Code(code) => {
                 let src = code.source.as_str();
                 if !src.trim().is_empty() {
-                    body.push_str("```python\n");
+                    // Header strip above the code block — language label on the
+                    // left, "Done · 42ms" on the right when the cell metadata
+                    // carries an exec time (persisted by the frontend save path
+                    // into `metadata.cellforge.exec_time_ms`). Matches the live
+                    // UI's `python • Done · 42ms` cell header, just laid out
+                    // for print.
+                    let exec_ms = code
+                        .metadata
+                        .get("cellforge")
+                        .and_then(|c| c.get("exec_time_ms"))
+                        .and_then(|v| v.as_u64());
+                    let time_label = match exec_ms {
+                        Some(ms) if ms < 1000 => format!(" · {ms} ms"),
+                        Some(ms) => format!(" · {:.1} s", ms as f64 / 1000.0),
+                        None => String::new(),
+                    };
+                    body.push_str(&format!(
+                        "#block(inset: (x: 8pt, y: 4pt), fill: luma(238), radius: (top: 4pt), width: 100%)[\n\
+                         #text(size: 8pt, fill: luma(80), font: \"New Computer Modern Mono\")[{lang}{time}]\n]\n",
+                        lang = escape_typst(&notebook_lang),
+                        time = time_label,
+                    ));
+                    body.push_str(&format!("```{notebook_lang}\n"));
                     body.push_str(src);
                     if !src.ends_with('\n') {
                         body.push('\n');
@@ -65,14 +107,23 @@ pub fn notebook_to_typst(
                                 let fname = format!("img_{img_counter}.svg");
                                 img_counter += 1;
                                 images.insert(fname.clone(), plain_text(svg));
-                                body.push_str(&format!("#image(\"{fname}\", width: 100%)\n\n"));
+                                // Wrapping #image in a width:100% block forces the image to
+                                // expand to full content width even when its natural pixel
+                                // size at the PDF's DPI would otherwise come out smaller
+                                // (which is what was making matplotlib confusion-matrix PNGs
+                                // render at ~half page width before).
+                                body.push_str(&format!(
+                                    "#block(width: 100%)[#image(\"{fname}\", width: 100%)]\n\n"
+                                ));
                             } else if let Some(png) = d.data.get("image/png") {
                                 _has_images = true;
                                 let b64 = plain_text(png).replace(['\n', ' '], "");
                                 let fname = format!("img_{img_counter}.png");
                                 img_counter += 1;
                                 images.insert(fname.clone(), b64);
-                                body.push_str(&format!("#image(\"{fname}\", width: 100%)\n\n"));
+                                body.push_str(&format!(
+                                    "#block(width: 100%)[#image(\"{fname}\", width: 100%)]\n\n"
+                                ));
                             }
                         }
                         Output::Error(e) => {

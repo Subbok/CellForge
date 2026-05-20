@@ -15,6 +15,17 @@ export function exportNotebookHtml() {
 
   // remove interactive UI elements that don't belong in export
   clone.querySelectorAll('button, [class*="opacity-0"], [class*="group/add"], [class*="cursor-grab"]').forEach(el => el.remove());
+
+  // Live UI relies on Tailwind utility classes (flex, gap-*, items-center,
+  // truncate, …) that aren't in the exported stylesheet. Without the
+  // declarations below, cell headers collapsed to inline text — that's why
+  // the language badge and status pill rendered as "pythonDone" without a
+  // separator — and outputs got clipped by stray inline `overflow:hidden`.
+  // Strip the latter inline so wide tables / long stdout don't disappear
+  // into a viewport-narrow box.
+  clone.querySelectorAll<HTMLElement>('[style*="overflow:hidden"], [style*="overflow: hidden"]').forEach(el => {
+    el.style.overflow = 'visible';
+  });
   // remove search highlights from export
   clone.querySelectorAll('.search-match, mark').forEach(el => {
     el.replaceWith(document.createTextNode(el.textContent ?? ''));
@@ -141,6 +152,35 @@ export function exportNotebookHtml() {
   img { max-width: 100%; border-radius: 6px; }
   svg { max-width: 100%; height: auto; }
   .katex-display { margin: 1em 0; }
+  /* Mini-Tailwind: utilities the live UI assumes are loaded. Without
+     them the cell header collapses (no flex → no gap → "pythonDone"
+     stuck together) and outputs lose their layout. Only the handful of
+     classes the notebook actually uses on visible elements. */
+  *, *::before, *::after { box-sizing: border-box; }
+  .flex { display: flex; }
+  .inline-flex { display: inline-flex; }
+  .flex-col { flex-direction: column; }
+  .flex-1 { flex: 1; }
+  .items-start { align-items: flex-start; }
+  .items-center { align-items: center; }
+  .items-end { align-items: flex-end; }
+  .justify-between { justify-content: space-between; }
+  .justify-end { justify-content: flex-end; }
+  .gap-0\\.5 { gap: 2px; }
+  .gap-1 { gap: 4px; }
+  .gap-1\\.5 { gap: 6px; }
+  .gap-2 { gap: 8px; }
+  .gap-2\\.5 { gap: 10px; }
+  .gap-3 { gap: 12px; }
+  .min-w-0 { min-width: 0; }
+  .max-w-full { max-width: 100%; }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .font-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+  .text-text-muted { color: #718096; }
+  .text-text-secondary { color: #4a5568; }
+  /* Headers and outputs need a bit of vertical breathing room in print. */
+  [data-cell-id] { margin: 16px 0; max-width: 100%; }
+  [data-cell-id] > * { max-width: 100%; }
   /* CellForge CSS var overrides for light HTML export — charts use these */
   :root {
     --color-text: #1a1a2e;
