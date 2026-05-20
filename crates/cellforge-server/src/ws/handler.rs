@@ -919,6 +919,23 @@ async fn handle_client_msg(
             );
 
             if code.is_empty() {
+                // Empty cell: don't bother the kernel, but DO send a synthetic
+                // execute_reply so the frontend's execution queue advances.
+                // Without this, an empty code cell encountered during Run All
+                // leaves the cell stuck in `running` and the queue waits
+                // forever for an ack the kernel will never send.
+                let ws_msg = WsMessage {
+                    msg_type: protocol::EXECUTE_REPLY.into(),
+                    id: msg.id,
+                    session_id: None,
+                    payload: serde_json::json!({
+                        "cell_id": cell_id,
+                        "content": { "status": "ok", "execution_count": null },
+                        "elapsed_ms": 0,
+                    }),
+                };
+                let mut tx = sess.ws_tx.lock().await;
+                let _ = send_json(&mut *tx, &ws_msg).await;
                 return;
             }
 
