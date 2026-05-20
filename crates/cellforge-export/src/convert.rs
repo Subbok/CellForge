@@ -57,8 +57,14 @@ pub fn notebook_to_typst(
                         Some(ms) => format!(" · {:.1} s", ms as f64 / 1000.0),
                         None => String::new(),
                     };
+                    // Header strip glued to the raw block below by setting
+                    // `below: 0pt`. The template's raw-block show rule has a
+                    // matching `above: 0pt` + `radius: (bottom: 4pt)`, so the
+                    // header (square-bottom, rounded-top) and the raw block
+                    // (square-top, rounded-bottom) meet on a flat edge with
+                    // no visual seam — one continuous card per code cell.
                     body.push_str(&format!(
-                        "#block(inset: (x: 8pt, y: 4pt), fill: luma(238), radius: (top: 4pt), width: 100%)[\n\
+                        "#block(inset: (x: 8pt, y: 4pt), fill: luma(238), radius: (top: 4pt), below: 0pt, width: 100%)[\n\
                          #text(size: 8pt, fill: luma(80), font: \"New Computer Modern Mono\")[{lang}{time}]\n]\n",
                         lang = escape_typst(&notebook_lang),
                         time = time_label,

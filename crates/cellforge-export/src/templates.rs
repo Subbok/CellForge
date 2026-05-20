@@ -217,12 +217,16 @@ pub const BLANK_TEMPLATE: &str = r#"
 #show raw: set text(font: "New Computer Modern Mono")
 #set par(justify: true)
 
-// code blocks — light gray bg
+// code blocks — light gray bg. Square top corners + zero spacing above
+// so the language/exec-time header that convert.rs emits directly above
+// the raw block slots flush against it (header has `radius: (top: 4pt)`
+// + `below: 0pt`; together they form one continuous code-cell card).
 #show raw.where(block: true): set text(size: 9pt)
 #show raw.where(block: true): block.with(
   fill: luma(245),
   inset: 8pt,
-  radius: 4pt,
+  radius: (bottom: 4pt),
+  above: 0pt,
   width: 100%,
 )
 
@@ -320,11 +324,15 @@ pub const LAB_REPORT_TEMPLATE: &str = r##"// Lab Report Template
 #show raw: set text(font: "New Computer Modern Mono")
 #set par(justify: true, leading: 0.65em)
 
+// Same square-top + zero-above setup as the blank template — see
+// convert.rs::notebook_to_typst, which puts a language/exec-time header
+// directly above each raw block.
 #show raw.where(block: true): set text(size: 9pt)
 #show raw.where(block: true): block.with(
   fill: luma(245),
   inset: 8pt,
-  radius: 4pt,
+  radius: (bottom: 4pt),
+  above: 0pt,
   width: 100%,
 )
 

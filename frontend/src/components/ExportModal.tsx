@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
 import { exportNotebookHtml } from '../services/exportHtml';
+import { cellToIpynb } from '../lib/serialize';
 import { useNotebookStore } from '../stores/notebookStore';
 import { useUIStore } from '../stores/uiStore';
 import { executeCommand } from '../plugins/registry';
@@ -89,12 +90,7 @@ export function ExportModal({ onClose }: Props) {
     const pluginFmt = pluginFormats.find(f => f.id === format);
     if (pluginFmt) {
       const { metadata, cells, filePath } = useNotebookStore.getState();
-      const nb = { metadata, nbformat: 4, nbformat_minor: 5,
-        cells: cells.map(c => ({
-          cell_type: c.cell_type, id: c.id, source: c.source, metadata: c.metadata,
-          ...(c.cell_type === 'code' ? { outputs: c.outputs, execution_count: c.execution_count } : {}),
-        })),
-      };
+      const nb = { metadata, nbformat: 4, nbformat_minor: 5, cells: cells.map(cellToIpynb) };
       executeCommand(pluginFmt.command, { notebook: nb, filePath });
       onClose();
       return;
@@ -109,13 +105,7 @@ export function ExportModal({ onClose }: Props) {
         metadata,
         nbformat: 4,
         nbformat_minor: 5,
-        cells: cells.map(c => ({
-          cell_type: c.cell_type,
-          id: c.id,
-          source: c.source,
-          metadata: c.metadata,
-          ...(c.cell_type === 'code' ? { outputs: c.outputs, execution_count: c.execution_count } : {}),
-        })),
+        cells: cells.map(cellToIpynb),
       };
 
       // auto-generate course-short from course-full (first letters).

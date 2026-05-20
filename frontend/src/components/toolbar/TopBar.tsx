@@ -5,6 +5,7 @@ import {
   MoreHorizontal,
 } from 'lucide-react';
 import { useNotebookStore } from '../../stores/notebookStore';
+import { cellToIpynb } from '../../lib/serialize';
 import { useKernelStore } from '../../stores/kernelStore';
 import { useUIStore } from '../../stores/uiStore';
 import { executeCommand } from '../../plugins/registry';
@@ -159,26 +160,7 @@ export function TopBar({ onExport, onSwitchKernel }: {
       metadata: nb.metadata,
       nbformat: 4,
       nbformat_minor: 5,
-      cells: nb.cells.map(c => {
-        // Persist execTimeMs into the CellForge metadata namespace so the
-        // "Done · 42ms" chip survives save→reload. Jupyter doesn't have a
-        // standard slot for execution time, so we keep it in metadata.cellforge
-        // (a no-op for any tool that doesn't recognise the namespace).
-        const cellforgeMeta: Record<string, unknown> | undefined =
-          c.cell_type === 'code' && c.execTimeMs != null
-            ? { ...(c.metadata?.cellforge as Record<string, unknown> | undefined), exec_time_ms: c.execTimeMs }
-            : (c.metadata?.cellforge as Record<string, unknown> | undefined);
-        const metadata = cellforgeMeta
-          ? { ...c.metadata, cellforge: cellforgeMeta }
-          : c.metadata;
-        return {
-          cell_type: c.cell_type,
-          id: c.id,
-          source: c.source,
-          metadata,
-          ...(c.cell_type === 'code' ? { outputs: c.outputs, execution_count: c.execution_count } : {}),
-        };
-      }),
+      cells: nb.cells.map(cellToIpynb),
     });
     useNotebookStore.setState({ dirty: false });
     const now = Date.now();
