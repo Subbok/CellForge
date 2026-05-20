@@ -410,7 +410,14 @@ function App() {
       restartKernel: () => {
         const spec = useKernelStore.getState().spec ?? 'python3';
         useKernelStore.getState().setStatus('restarting');
-        ws.reconnect(spec, useNotebookStore.getState().filePath ?? undefined);
+        // abortRunning=true so the in-flight cell flips back to idle —
+        // see TopBar.doRestart for why bare reconnect leaves the UI
+        // stuck on "Running…" otherwise.
+        clearQueue(true);
+        ws.send('restart_kernel');
+        setTimeout(() => {
+          ws.reconnect(spec, useNotebookStore.getState().filePath ?? undefined);
+        }, 250);
       },
       interrupt: () => {
         ws.send('interrupt');

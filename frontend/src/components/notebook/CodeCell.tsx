@@ -191,6 +191,11 @@ export function CodeCell({ cell }: { cell: Cell }) {
         // dispose+recreate the model on every reorder, dropping undo history,
         // focus, and momentarily detaching the Yjs MonacoBinding.
         key={cell.id}
+        // Stable per-cell path → Monaco gives each editor its own model URI.
+        // Without it the wrapper's path-change effect can race with React's
+        // dev-mode double-mount and call setModel on a disposed editor
+        // (manifests as "InstantiationService has been disposed" mid-drag).
+        path={`cf://cell/${cell.id}`}
         language={monacoLanguage(monacoLang)}
         // When collab is active, MonacoBinding owns the model — don't set value
         // as a controlled prop or it will fight with Yjs and reset cursors.

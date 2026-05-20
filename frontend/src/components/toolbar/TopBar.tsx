@@ -115,15 +115,34 @@ export function TopBar({ onExport, onSwitchKernel }: {
   function doRestart() {
     useKernelStore.getState().setStatus('restarting');
     useVariableStore.getState().clearAll();
-    clearQueue();
-    ws.reconnect(spec ?? 'python3', useNotebookStore.getState().filePath ?? undefined);
+    // abortRunning=true so the in-flight cell (which the backend is about
+    // to kill via control-channel shutdown) flips back to idle in the UI
+    // instead of staying on "Running…" forever — the execute_reply will
+    // never arrive because the kernel that was supposed to send it just
+    // got SIGKILL'd.
+    clearQueue(true);
+    // Tell the BACKEND to restart first — without this, ws.reconnect alone
+    // just rebinds the websocket and the next connect happily "reuses" the
+    // still-alive kernel (notebook_kernels mapping never got cleared). That
+    // was the "restart didn't restart" bug: shell socket stayed busy with
+    // the current cell and the user saw it run to completion before
+    // anything else happened. The backend handler (RESTART_KERNEL) now
+    // tears down the kernel + clears its mappings, so the reconnect below
+    // lazy-spawns a fresh one via the standard subscribe path.
+    ws.send('restart_kernel');
+    // Tiny delay so the WS message lands and the backend cleanup runs
+    // before we tear down the connection — otherwise we drop the socket
+    // mid-handler and the message gets eaten.
+    setTimeout(() => {
+      ws.reconnect(spec ?? 'python3', useNotebookStore.getState().filePath ?? undefined);
+      if (restartRunAll) {
+        const codeIds = useNotebookStore.getState().cells
+          .filter(c => c.cell_type === 'code')
+          .map(c => c.id);
+        queueCells(codeIds);
+      }
+    }, 250);
     setRestartOpen(false);
-    if (restartRunAll) {
-      const codeIds = useNotebookStore.getState().cells
-        .filter(c => c.cell_type === 'code')
-        .map(c => c.id);
-      queueCells(codeIds);
-    }
   }
 
   async function openShare() {

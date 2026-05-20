@@ -13,11 +13,15 @@ export function Notebook() {
     <div data-notebook-root className="max-w-5xl mx-auto py-4 px-3 sm:px-5 relative bg-bg min-h-full my-1">
       {cells.map((cell, index) => (
         <div key={cell.id} data-cell-idx={index} data-cell-id={cell.id}>
-          {/* drop indicator line */}
+          {/* Drop indicator line. The key is critical — without it React
+              reconciles the two sibling children (indicator + CellContainer)
+              by position; when the indicator appears/disappears during drag
+              it shifts CellContainer's position and React unmounts+remounts
+              it, disposing Monaco mid-render → "InstantiationService disposed". */}
           {drag.dragging && drag.dropIdx === index && drag.fromIdx !== index && (
-            <div className="h-0.5 bg-accent rounded-full mx-4 mb-1 shadow-[0_0_6px_rgba(108,140,255,0.5)]" />
+            <div key="drop-indicator" className="h-0.5 bg-accent rounded-full mx-4 mb-1 shadow-[0_0_6px_rgba(108,140,255,0.5)]" />
           )}
-          <CellContainer cell={cell} index={index} />
+          <CellContainer key="cell" cell={cell} index={index} />
         </div>
       ))}
 

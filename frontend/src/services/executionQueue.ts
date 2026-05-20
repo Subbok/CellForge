@@ -19,7 +19,14 @@ export function queueCells(cellIds: string[]) {
   drain();
 }
 
-export function clearQueue() {
+/**
+ * Clear the run queue. Pass `abortRunning = true` (the restart path does
+ * this) to also flip any currently-`running` cell back to `idle` and
+ * clear the kernel store's executingCell. Without that, the user sees
+ * "Running…" stuck on the in-flight cell forever after a restart —
+ * the kernel is dead and the execute_reply will never arrive.
+ */
+export function clearQueue(abortRunning: boolean = false) {
   const store = useNotebookStore.getState();
   for (const id of queue) {
     if (store.cells.find(c => c.id === id)?.status === 'queued') {
@@ -27,6 +34,18 @@ export function clearQueue() {
     }
   }
   queue = [];
+  if (abortRunning) {
+    for (const cell of store.cells) {
+      if (cell.status === 'running') {
+        store.setCellStatus(cell.id, 'idle');
+      }
+    }
+    useKernelStore.getState().setExecutingCell(null);
+    // Reset the queue's internal "we have a cell in flight" flag —
+    // without this, the next queueCells() call gets stuck on a
+    // phantom running cell that no kernel will ever ack.
+    running = false;
+  }
 }
 
 function drain() {
