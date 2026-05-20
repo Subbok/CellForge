@@ -171,10 +171,13 @@ impl KernelManager {
             anyhow::bail!("no kernel with id {id}");
         };
 
-        let _ = kernel
-            .client
-            .send_shell("shutdown_request", serde_json::json!({"restart": false}))
-            .await;
+        // shutdown_request on the CONTROL channel, not shell. ipykernel
+        // reads control even while shell is mid-execute, so a kernel
+        // grinding on a long cell still shuts down promptly. Shell-side
+        // shutdown used to queue behind the current cell and the user
+        // would see "restart" wait until the cell ended on its own,
+        // defeating the whole point of pressing the button.
+        let _ = kernel.client.shutdown(false).await;
 
         let killed =
             tokio::time::timeout(std::time::Duration::from_secs(2), kernel.child.wait()).await;
@@ -247,6 +250,20 @@ impl KernelManager {
 
     pub async fn interrupt(&mut self, id: &str) -> Result<()> {
         let kernel = self.kernels.get_mut(id).context("no such kernel")?;
+
+        // First try the wire — `interrupt_request` on the control channel.
+        // This is the right path for any kernel listening on control
+        // (ipykernel, irkernel, ijulia, all post-2018 kernels do). Works
+        // through the bubblewrap sandbox because it's a TCP/IPC message,
+        // not a UNIX signal — and it actually reaches the ipykernel main
+        // loop instead of getting eaten by `bwrap` (which doesn't forward
+        // SIGINT to its child).
+        let _ = kernel.client.interrupt().await;
+
+        // Fallback: SIGINT to the spawned process. Some kernels (older
+        // ones, anything not listening on control) only honour the
+        // signal. Cheap to send both — ipykernel just ignores the dup,
+        // and on Windows we go straight to the console-ctrl path.
         if let Some(pid) = kernel.child.id() {
             #[cfg(unix)]
             unsafe {

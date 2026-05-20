@@ -10,15 +10,24 @@ use zeromq::{DealerSocket, Socket, SocketRecv, SocketSend, SubSocket, ZmqMessage
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Send commands to the shell task.
-struct ShellCmd {
+/// Send commands to the shell or control task. Same shape for both —
+/// each owns its own DEALER socket and a `mpsc::Receiver<WireCmd>`.
+struct WireCmd {
     frames: Vec<Bytes>,
     done: oneshot::Sender<()>,
 }
 
 pub struct KernelClient {
     pub session_id: String,
-    shell_tx: mpsc::Sender<ShellCmd>,
+    shell_tx: mpsc::Sender<WireCmd>,
+    /// Control channel — independent ZMQ DEALER on the kernel's control
+    /// port. ipykernel reads control even while shell is busy with a long
+    /// `execute_request`, so this is the right place to send
+    /// `interrupt_request` and `shutdown_request` if you want them to
+    /// actually fire mid-execute (shell-side equivalents queue up behind
+    /// whatever the kernel is currently doing and don't run until it
+    /// returns, which is exactly the "restart didn't restart" bug).
+    control_tx: mpsc::Sender<WireCmd>,
     key: Vec<u8>,
 }
 
@@ -57,7 +66,7 @@ impl KernelClient {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // shell task: owns the socket, handles both send and recv
-        let (cmd_tx, mut cmd_rx) = mpsc::channel::<ShellCmd>(32);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<WireCmd>(32);
         let (reply_tx, shell_rx) = mpsc::channel::<JupyterMessage>(64);
         let shell_key = key_bytes.clone();
 
@@ -80,6 +89,28 @@ impl KernelClient {
                         {
                             break;
                         }
+                    }
+                }
+            }
+        });
+
+        // control task: same shape as shell, owns the control DEALER.
+        // We drop control replies on the floor — ipykernel acks
+        // `interrupt_request` and `shutdown_request` with empty content,
+        // and nobody on the server side waits for either ack. Keeping
+        // recv() pumped anyway so the socket doesn't back up.
+        let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<WireCmd>(8);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    cmd = ctrl_rx.recv() => {
+                        let Some(cmd) = cmd else { break };
+                        let Ok(zmq_msg) = ZmqMessage::try_from(cmd.frames) else { continue };
+                        let _ = control.send(zmq_msg).await;
+                        let _ = cmd.done.send(());
+                    }
+                    reply = control.recv() => {
+                        if reply.is_err() { break }
                     }
                 }
             }
@@ -115,6 +146,7 @@ impl KernelClient {
             client: KernelClient {
                 session_id,
                 shell_tx: cmd_tx,
+                control_tx: ctrl_tx,
                 key: key_bytes,
             },
             iopub_rx,
@@ -126,6 +158,34 @@ impl KernelClient {
         &mut self,
         msg_type: &str,
         content: serde_json::Value,
+    ) -> Result<String> {
+        self.send_on(&self.shell_tx.clone(), msg_type, content, "shell")
+            .await
+    }
+
+    /// Send a message on the control channel. Use for `interrupt_request`
+    /// and `shutdown_request` — ipykernel reads these even while shell is
+    /// blocked on a long `execute_request`. Sending them on shell would
+    /// queue them behind the currently-running cell (i.e. they wouldn't
+    /// fire until the cell finished, which defeats the purpose).
+    pub async fn send_control(
+        &mut self,
+        msg_type: &str,
+        content: serde_json::Value,
+    ) -> Result<String> {
+        self.send_on(&self.control_tx.clone(), msg_type, content, "control")
+            .await
+    }
+
+    /// Shared send path for shell + control. Builds the wire frames, pushes
+    /// them onto the requested channel's task, and waits for the task to
+    /// confirm the bytes hit the socket.
+    async fn send_on(
+        &self,
+        tx: &mpsc::Sender<WireCmd>,
+        msg_type: &str,
+        content: serde_json::Value,
+        channel: &'static str,
     ) -> Result<String> {
         let msg_id = Uuid::new_v4().to_string();
         let header = JupyterHeader {
@@ -139,15 +199,40 @@ impl KernelClient {
 
         let frames = build_wire_msg(&header, &content, &self.key)?;
         let (done_tx, done_rx) = oneshot::channel();
-        self.shell_tx
-            .send(ShellCmd {
-                frames,
-                done: done_tx,
-            })
-            .await
-            .map_err(|_| anyhow::anyhow!("shell task gone"))?;
-        let _ = done_rx.await; // wait for send to complete
+        tx.send(WireCmd {
+            frames,
+            done: done_tx,
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("{channel} task gone"))?;
+        let _ = done_rx.await;
         Ok(msg_id)
+    }
+
+    /// Fire-and-forget `interrupt_request` on the control channel.
+    /// ipykernel responds by raising KeyboardInterrupt inside whatever
+    /// the user code is currently doing. Caller doesn't await an ack
+    /// because ipykernel's reply is empty content — the observable
+    /// outcome is the in-flight `execute_reply` arriving with
+    /// `status: "aborted"` (or "error" with KeyboardInterrupt).
+    pub async fn interrupt(&mut self) -> Result<()> {
+        self.send_control("interrupt_request", serde_json::json!({}))
+            .await?;
+        Ok(())
+    }
+
+    /// `shutdown_request` on the control channel. ipykernel begins a
+    /// clean shutdown immediately — does not wait for shell to drain.
+    /// `restart=true` tells the kernel to expect an immediate respawn
+    /// (we always pass `false` because the kernel manager re-creates the
+    /// process itself after this returns).
+    pub async fn shutdown(&mut self, restart: bool) -> Result<()> {
+        self.send_control(
+            "shutdown_request",
+            serde_json::json!({ "restart": restart }),
+        )
+        .await?;
+        Ok(())
     }
 
     pub async fn execute(&mut self, code: &str, silent: bool) -> Result<String> {
