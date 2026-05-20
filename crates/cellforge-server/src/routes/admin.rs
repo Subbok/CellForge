@@ -131,7 +131,16 @@ pub async fn create_user(
     // creates non-admin (its first-user-admin path is gated on has_users()).
     let mut user = state
         .users
-        .register(&req.username, &req.password, &display, &admin.username)
+        // Admin-created accounts get must_change_password=true — the
+        // password the admin set is a one-shot bootstrap value, not the
+        // user's real password.
+        .register(
+            &req.username,
+            &req.password,
+            &display,
+            &admin.username,
+            true,
+        )
         .map_err(|e| {
             tracing::warn!("admin create_user failed: {e}");
             if e.to_string().contains("already taken") {

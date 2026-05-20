@@ -104,6 +104,16 @@ COPY --from=builder /usr/local/bin/cellforge-server /usr/local/bin/cellforge-ser
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV VIRTUAL_ENV="/opt/venv"
 
+# The image is provisioned with bubblewrap and an unprivileged kernel uid,
+# so a properly-launched container (with --privileged or equivalent cap
+# additions) gets the full sandbox. Defaulting to `required` here means a
+# misconfigured run (no --privileged, no seccomp/apparmor overrides) hard-
+# fails at startup with a clear error instead of silently running every
+# kernel as root with no isolation. Operators on a single-user laptop who
+# don't care can still override with CELLFORGE_KERNEL_SANDBOX=off in their
+# compose.
+ENV CELLFORGE_KERNEL_SANDBOX=required
+
 EXPOSE 8888
 WORKDIR /data
 ENTRYPOINT ["cellforge-server", "--allow-network"]

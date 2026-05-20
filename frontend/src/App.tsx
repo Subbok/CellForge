@@ -25,6 +25,7 @@ import type { Notebook } from './lib/types';
 import { LoginPage } from './components/LoginPage';
 import { HomeDashboard } from './components/HomeDashboard';
 import { AdminPanel } from './components/AdminPanel';
+import { ForcePasswordChange } from './components/ForcePasswordChange';
 import { UpdateNotice } from './components/UpdateNotice';
 import { AppShell } from './components/layout/AppShell';
 import type { NavStage } from './components/layout/FFNav';
@@ -90,7 +91,7 @@ const EMPTY_RECENT: { file_path: string; last_opened: string }[] = [];
 function App() {
   const { t } = useTranslation();
   const [stage, setStageRaw] = useState<Stage>('loading');
-  const [user, setUser] = useState<{ username: string; is_admin: boolean; is_super_admin?: boolean } | null>(null);
+  const [user, setUser] = useState<{ username: string; display_name?: string; is_admin: boolean; is_super_admin?: boolean; must_change_password?: boolean } | null>(null);
   const [isFirstUser, setIsFirstUser] = useState(false);
   const [pending, setPending] = useState<{ path: string; nb: Notebook } | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -133,6 +134,7 @@ function App() {
   const setPlugins = useUIStore(s => s.setPlugins);
   const setAllowUserPlugins = useUIStore(s => s.setAllowUserPlugins);
   const setIsAdmin = useUIStore(s => s.setIsAdmin);
+  const setHubMode = useUIStore(s => s.setHubMode);
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -152,13 +154,23 @@ function App() {
       } catch (e) {
         console.warn('plugin config fetch failed:', e);
       }
+      // Pull deployment-shape flags (currently just hub_mode). Used by the
+      // Admin panel to hide the Groups + Resource limits + Running Kernels
+      // sections in non-hub deployments — the basic Members table stays.
+      try {
+        const cfg = await api.getConfig();
+        if (cancelled) return;
+        setHubMode(cfg.hub_mode);
+      } catch (e) {
+        console.warn('app config fetch failed:', e);
+      }
       // load frontend JS modules from plugins that declare widgets
       if (!cancelled && pluginList.length > 0) {
         await loadPluginModules(pluginList);
       }
     })();
     return () => { cancelled = true; };
-  }, [user, setPlugins, setAllowUserPlugins]);
+  }, [user, setPlugins, setAllowUserPlugins, setHubMode]);
 
   // Keep `isAdmin` in the store in sync with the currently-authenticated user,
   // so plugin admin surfaces can flip visibility without threading user props.
@@ -568,6 +580,23 @@ function App() {
         onNewNotebook={newNotebookFromPalette}
         notebookActions={notebookActions}
       />
+
+      {/* Force-password-change modal. Renders ON TOP of whatever stage is
+          live, blocking interaction until the user picks their own password.
+          Backend clears must_change_password on a self-change; we refetch
+          /auth/me on success to flip the flag in user state, which unmounts
+          this modal. */}
+      {user?.must_change_password && (
+        <ForcePasswordChange
+          username={user.display_name || user.username}
+          onDone={async () => {
+            try {
+              const refreshed = await api.authMe();
+              if (refreshed.ok && refreshed.user) setUser(refreshed.user);
+            } catch { /* if refetch fails, next nav request will retry; modal stays */ }
+          }}
+        />
+      )}
     </AppShell>
   );
 }

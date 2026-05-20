@@ -52,6 +52,10 @@ export interface AuthUser {
   /** True only for the bootstrap admin (id == 1). They can demote/delete
    *  other admins; nothing in the app can demote or delete them. */
   is_super_admin?: boolean;
+  /** True when the user must set a new password before doing anything
+   *  else — set on admin-created accounts and on admin password resets.
+   *  Cleared when the user changes their own password. */
+  must_change_password?: boolean;
   role?: string;
 }
 
@@ -187,7 +191,7 @@ export const api = {
     get<{ id: number; to_user: string }[]>(`/files/shares-by-me?file_name=${encodeURIComponent(fileName)}`),
   unshareFile: (shareId: number) => post<void>('/files/unshare', { share_id: shareId }),
   shareUsers: () => get<{ username: string; display_name: string }[]>('/files/share-users'),
-  getConfig: () => get<{ notebook_dir: string; initial_notebook: string | null }>('/config'),
+  getConfig: () => get<{ notebook_dir: string; initial_notebook: string | null; hub_mode: boolean }>('/config'),
   listNotebooks: () => get<{ name: string; path: string }[]>('/notebooks'),
   getNotebook: (path: string) => get<Notebook>(`/notebooks/${path}`),
   openNotebookPath: (path: string) => post<Notebook>('/notebooks/open', { path }),

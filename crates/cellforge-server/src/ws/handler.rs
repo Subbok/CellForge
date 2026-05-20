@@ -104,13 +104,12 @@ async fn handle_socket(
         None => Vec::new(),
     };
 
-    // Pre-kernel-start resource checks. `max_kernels` applies in ANY deployment
-    // mode — an admin who configured per-user limits expects them to fire
-    // whether or not `--hub` was passed. The
-    // `user_is_active` (admin-disable) check stays hub-only for now since
-    // the underlying disable flow needs a follow-up pass.
+    // Pre-kernel-start resource checks. Per-user `max_kernels` and the
+    // `is_active` (admin-disable) check both apply in ANY deployment mode
+    // — an admin who configured limits or disabled an account expects them
+    // to fire whether or not `--hub` was passed.
     if let Some(ref name) = username {
-        if state.hub_mode && !state.users.user_is_active(name) {
+        if !state.users.user_is_active(name) {
             let err_msg = WsMessage {
                 msg_type: protocol::ERROR.into(),
                 id: "boot".into(),

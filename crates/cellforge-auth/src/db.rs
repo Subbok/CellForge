@@ -40,6 +40,11 @@ pub struct User {
     /// "remove" button.
     #[serde(default)]
     pub has_avatar: bool,
+    /// True when the user must change their password before doing anything
+    /// else. Set on admin-created accounts and on admin-reset passwords;
+    /// cleared the moment the user changes their own password.
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 /// Bcrypt hash of a fixed dummy password at cost 12 — same cost factor used
@@ -215,6 +220,20 @@ impl UserDb {
             conn.execute_batch("PRAGMA user_version = 9;")?;
         }
 
+        // Migration 10 — force password change on first login. Set to 1 for
+        // every account an admin creates and for any password reset done by
+        // an admin on behalf of another user; cleared the moment the target
+        // user sets their own password. Pre-existing accounts default to 0
+        // (they've been using the system, no reason to suddenly demand a
+        // change). Bootstrap admin also stays at 0 — they pick their own
+        // password during registration.
+        if version < 10 {
+            let _ = conn.execute_batch(
+                "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
+            );
+            conn.execute_batch("PRAGMA user_version = 10;")?;
+        }
+
         Ok(())
     }
 
@@ -240,7 +259,8 @@ impl UserDb {
                 token_version INTEGER NOT NULL DEFAULT 0,
                 created_by TEXT NOT NULL DEFAULT '',
                 last_seen_at DATETIME DEFAULT NULL,
-                max_storage_mb INTEGER NOT NULL DEFAULT 0
+                max_storage_mb INTEGER NOT NULL DEFAULT 0,
+                must_change_password INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS activity_events (
@@ -309,6 +329,7 @@ impl UserDb {
         password: &str,
         display_name: &str,
         created_by: &str,
+        must_change_password: bool,
     ) -> Result<User> {
         let username = username.trim().to_lowercase();
         if username.is_empty() || username.len() < 2 {
@@ -327,8 +348,8 @@ impl UserDb {
         let is_admin = !self.has_users(); // first user = admin
         let conn = self.conn.lock();
         conn.execute(
-            "INSERT INTO users (username, password_hash, display_name, workspace_dir, is_admin, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![username, hash, display_name, workspace.to_string_lossy().to_string(), is_admin as i32, created_by],
+            "INSERT INTO users (username, password_hash, display_name, workspace_dir, is_admin, created_by, must_change_password) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![username, hash, display_name, workspace.to_string_lossy().to_string(), is_admin as i32, created_by, must_change_password as i32],
         ).map_err(|e| {
             if e.to_string().contains("UNIQUE") {
                 anyhow::anyhow!("username '{}' already taken", username)
@@ -350,6 +371,7 @@ impl UserDb {
             is_super_admin: id == 1,
             email: None,
             has_avatar: false,
+            must_change_password,
         })
     }
 
@@ -468,11 +490,11 @@ impl UserDb {
         // Look up the row under the DB lock, then drop the lock before running
         // bcrypt (100-300ms of pure CPU). Keeping verify outside the lock also
         // lets concurrent readers proceed during a login storm.
-        type Row = (i64, String, String, String, String, i32, String);
+        type Row = (i64, String, String, String, String, i32, String, i32);
         let row: Option<Row> = {
             let conn = self.conn.lock();
             let mut stmt = conn.prepare(
-                "SELECT id, username, password_hash, display_name, workspace_dir, is_admin, created_at FROM users WHERE username = ?1"
+                "SELECT id, username, password_hash, display_name, workspace_dir, is_admin, created_at, must_change_password FROM users WHERE username = ?1"
             )?;
             stmt.query_row(rusqlite::params![username], |row| {
                 Ok((
@@ -483,6 +505,7 @@ impl UserDb {
                     row.get::<_, String>(4)?,
                     row.get::<_, i32>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, i32>(7)?,
                 ))
             })
             .ok()
@@ -502,9 +525,16 @@ impl UserDb {
         // requires a real row, so the dummy hash can never authenticate even
         // if an attacker somehow supplies the dummy plaintext.
         match row {
-            Some((id, uname, _hash, display_name, workspace_dir, is_admin, created_at))
-                if verified =>
-            {
+            Some((
+                id,
+                uname,
+                _hash,
+                display_name,
+                workspace_dir,
+                is_admin,
+                created_at,
+                must_change,
+            )) if verified => {
                 Ok(User {
                     id,
                     username: uname,
@@ -514,12 +544,15 @@ impl UserDb {
                     created_at,
                     // Login response doesn't carry these fields; admin views fetch
                     // them via list_users(). Keep the API minimal and let admin
-                    // queries pull the full row.
+                    // queries pull the full row. must_change_password is the
+                    // exception — the frontend checks it right after login to
+                    // decide whether to open the force-change modal.
                     created_by: String::new(),
                     last_seen_at: None,
                     is_super_admin: id == 1,
                     email: None,
                     has_avatar: false,
+                    must_change_password: must_change != 0,
                 })
             }
             _ => bail!("invalid username or password"),
@@ -529,7 +562,16 @@ impl UserDb {
     /// Change a user's password. Caller must verify authorization (self or admin).
     /// Bumps token_version in the same write so every outstanding JWT for the
     /// user is rejected on next use.
-    pub fn change_password(&self, username: &str, new_password: &str) -> Result<()> {
+    /// `must_change_password` controls the post-change flag on the user
+    /// row. Set `true` when an admin resets someone else's password
+    /// (forces a fresh self-pick on next login), `false` when the user
+    /// changes their own (clears any stale must-change flag).
+    pub fn change_password(
+        &self,
+        username: &str,
+        new_password: &str,
+        must_change_password: bool,
+    ) -> Result<()> {
         if new_password.len() < 8 {
             bail!("password must be at least 8 characters");
         }
@@ -539,9 +581,14 @@ impl UserDb {
         let conn = self.conn.lock();
         let rows = conn.execute(
             "UPDATE users
-             SET password_hash = ?1, token_version = token_version + 1
-             WHERE username = ?2",
-            rusqlite::params![hash, username.trim().to_lowercase()],
+             SET password_hash = ?1, token_version = token_version + 1,
+                 must_change_password = ?2
+             WHERE username = ?3",
+            rusqlite::params![
+                hash,
+                must_change_password as i32,
+                username.trim().to_lowercase()
+            ],
         )?;
         if rows == 0 {
             bail!("user not found");
@@ -552,7 +599,7 @@ impl UserDb {
     pub fn get_user(&self, username: &str) -> Result<User> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at, email, avatar_path FROM users WHERE username = ?1"
+            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at, email, avatar_path, must_change_password FROM users WHERE username = ?1"
         )?;
 
         stmt.query_row(rusqlite::params![username], |row| {
@@ -570,6 +617,7 @@ impl UserDb {
                 is_super_admin: id == 1,
                 email: row.get(8)?,
                 has_avatar: avatar_path.is_some(),
+                must_change_password: row.get::<_, i32>(10)? != 0,
             })
         })
         .map_err(|_| anyhow::anyhow!("user not found"))
@@ -578,7 +626,7 @@ impl UserDb {
     pub fn list_users(&self) -> Vec<User> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at, email, avatar_path FROM users ORDER BY id"
+            "SELECT id, username, display_name, workspace_dir, is_admin, created_at, created_by, last_seen_at, email, avatar_path, must_change_password FROM users ORDER BY id"
         ).unwrap();
 
         stmt.query_map([], |row| {
@@ -596,6 +644,7 @@ impl UserDb {
                 is_super_admin: id == 1,
                 email: row.get(8)?,
                 has_avatar: avatar_path.is_some(),
+                must_change_password: row.get::<_, i32>(10)? != 0,
             })
         })
         .unwrap()

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { langColor } from '../lib/languages';
 import { FFModalShell, FFInput, FFSelect } from './modals/FFModalShell';
+import { useUIStore } from '../stores/uiStore';
 
 interface AdminStats { user_count: number; total_kernels: number; total_memory_mb: number; }
 interface AdminUser {
@@ -101,6 +102,11 @@ function StatCard({ label, value, sub, color }: {
 
 export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean }) {
   const { t } = useTranslation();
+  // Hub mode gates the advanced sections (groups + per-group resource
+  // limits + running kernels monitor). Basic user CRUD stays visible
+  // either way so a small deployment can still add/disable/reset users
+  // from the UI without `--hub`.
+  const hubMode = useUIStore(s => s.hubMode);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [groups, setGroups] = useState<AdminGroup[]>([]);
@@ -588,7 +594,10 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
           })}
         </section>
 
-        {/* Groups */}
+        {/* Groups — hub-mode only. The /admin/groups API is gated by
+            require_hub on the backend, so rendering it without --hub would
+            just show an empty list and 403 on every POST/PUT/DELETE. */}
+        {hubMode && (
         <section style={{ marginBottom: 24 }}>
           <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
             <h2 className="text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted">
@@ -675,8 +684,12 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
             </div>
           )}
         </section>
+        )}
 
-        {/* Running kernels */}
+        {/* Running kernels — hub-mode only. /admin/kernels{,/stop,/stop-idle}
+            require_hub on the backend; without --hub the section would just
+            be a dead "no kernels" stub. */}
+        {hubMode && (
         <section>
           <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
             <h2 className="text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted">
@@ -745,6 +758,7 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
             </div>
           )}
         </section>
+        )}
       </div>
 
       {/* Portalled kebab dropdown — single instance, opens for whichever

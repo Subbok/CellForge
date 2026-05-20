@@ -144,6 +144,29 @@ async fn active_user_check(
     next.run(req).await
 }
 
+/// Middleware: reject `/admin/*` requests when the server was started
+/// without `--hub`. The admin surface (groups, per-user resource limits,
+/// kernel monitoring, idle reaper) is hub-only — basic user management
+/// for small deployments still works through `/auth/users`. Frontend
+/// hides the Admin nav button based on `hub_mode` from `/api/config`;
+/// this middleware enforces it on the API side so admins poking the
+/// routes directly get a clear refusal.
+async fn require_hub(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !state.hub_mode {
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            "admin API requires --hub mode",
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
 /// Middleware: reject any request without a valid JWT cookie. Applied via
 /// `route_layer` to the private branch of the API router (everything except
 /// `/health`, `/auth/status`, `/auth/login`, `/auth/register`). Stops the
@@ -339,7 +362,10 @@ fn build_api_router() -> Router<Arc<AppState>> {
             "/kernels/{id}/stop",
             axum::routing::post(dashboard::stop_kernel),
         )
-        // Admin
+        // Admin — basic user management. Available whenever the deployment
+        // has admins (so a single-user-with-helper setup can still happen
+        // through the UI instead of curl). `require_admin` inside each
+        // handler gates non-admin callers.
         .route("/admin/stats", get(admin::stats))
         .route(
             "/admin/users",
@@ -349,6 +375,29 @@ fn build_api_router() -> Router<Arc<AppState>> {
             "/admin/users/{username}",
             axum::routing::put(admin::update_user),
         )
+        // AI proxy
+        .route("/ai/chat", axum::routing::post(ai::chat))
+        // Update check
+        .route("/update-check", get(update_check_handler))
+        // Git
+        .route("/git/status", get(git::status))
+        .route("/ws", get(ws_handler))
+        .route("/collab", get(crate::ws::collab::collab_handler))
+        // `route_layer` (vs `layer`) only wraps the routes registered on this
+        // Router — `public.merge(private)` keeps the public branch unwrapped.
+        .route_layer(axum::middleware::from_fn(require_auth));
+
+    public.merge(private)
+}
+
+/// Hub-only admin surface — groups, per-group resource limits, kernel
+/// monitoring. Hidden in single-user / small-deployment setups (basic
+/// user CRUD lives in `build_api_router` above and is always available
+/// to admins); the `--hub` flag opts in to this advanced subset.
+/// Pulled out from `build_api_router` because `require_hub` needs the
+/// AppState handle, which only exists after `with_state` in `run_server`.
+fn build_admin_hub_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    Router::new()
         .route(
             "/admin/groups",
             get(admin::list_groups).post(admin::create_group),
@@ -366,19 +415,8 @@ fn build_api_router() -> Router<Arc<AppState>> {
             "/admin/kernels/stop-idle",
             axum::routing::post(admin::stop_all_idle),
         )
-        // AI proxy
-        .route("/ai/chat", axum::routing::post(ai::chat))
-        // Update check
-        .route("/update-check", get(update_check_handler))
-        // Git
-        .route("/git/status", get(git::status))
-        .route("/ws", get(ws_handler))
-        .route("/collab", get(crate::ws::collab::collab_handler))
-        // `route_layer` (vs `layer`) only wraps the routes registered on this
-        // Router — `public.merge(private)` keeps the public branch unwrapped.
-        .route_layer(axum::middleware::from_fn(require_auth));
-
-    public.merge(private)
+        .route_layer(axum::middleware::from_fn_with_state(state, require_hub))
+        .route_layer(axum::middleware::from_fn(require_auth))
 }
 
 /// Start the CellForge server on the given listener with the provided config.
@@ -400,7 +438,7 @@ pub async fn run_server(listener: tokio::net::TcpListener, config: Config) -> an
         });
     }
 
-    let api = build_api_router();
+    let api = build_api_router().merge(build_admin_hub_router(state.clone()));
 
     // background reaper: every 30s, kill any idle kernels that have no connected clients.
     // Snapshot the IDs under the lock, then stop kernels one-at-a-time so the

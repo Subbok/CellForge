@@ -88,6 +88,11 @@ interface UIState {
   availableThemes: ThemeEntry[];
   plugins: PluginEntry[];
   isAdmin: boolean;
+  /** True when the server was started with `--hub`. Gates the Groups +
+   *  Resource limits + Running Kernels sections of the Admin panel; basic
+   *  user management (members table + reset password) stays visible to
+   *  admins either way. Fetched once from /api/config after login. */
+  hubMode: boolean;
   allowUserPlugins: boolean;
   currentThemeId: string;
   /** Aggregated contributions from all loaded plugins — UI components read these. */
@@ -121,6 +126,7 @@ interface UIState {
   setPlugins: (plugins: PluginEntry[]) => void;
   setAllowUserPlugins: (allow: boolean) => void;
   setIsAdmin: (admin: boolean) => void;
+  setHubMode: (hub: boolean) => void;
   setCurrentThemeId: (id: string) => void;
 }
 
@@ -149,6 +155,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   availableThemes: [BUILTIN_THEME, BUILTIN_LIGHT_THEME],
   plugins: [],
   isAdmin: false,
+  hubMode: false,
   allowUserPlugins: true,
   currentThemeId: persisted.currentThemeId ?? BUILTIN_THEME.id,
   pluginToolbarButtons: [],
@@ -254,6 +261,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   setAllowUserPlugins: (allow) => set({ allowUserPlugins: allow }),
   setIsAdmin: (admin) => set({ isAdmin: admin }),
+  setHubMode: (hub) => set({ hubMode: hub }),
   setCurrentThemeId: (id) => {
     set({ currentThemeId: id });
     persist(get());

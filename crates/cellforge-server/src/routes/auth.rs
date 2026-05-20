@@ -9,15 +9,15 @@ use std::sync::Arc;
 use crate::state::AppState;
 
 /// Detect whether the request came in over HTTPS. Order of checks:
-/// 1. `CELLFORGE_COOKIE_SECURE=1` env — force-on opt-in for deployments that
-///    know they're TLS-terminated but can't set `X-Forwarded-Proto` (e.g.
-///    some Cloudflare Tunnel setups).
+/// 1. `CELLFORGE_COOKIE_SECURE=1` (or umbrella `CELLFORGE_BEHIND_PROXY=1`)
+///    env — force-on opt-in for deployments that know they're TLS-terminated
+///    but can't set `X-Forwarded-Proto` (e.g. some Cloudflare Tunnel setups).
 /// 2. `X-Forwarded-Proto` header — set by reverse proxies like nginx /
 ///    Cloudflare / Traefik.
 /// 3. Otherwise assume plain HTTP. Safer to skip `Secure` than to set it and
 ///    have browsers drop the cookie on a localhost dev setup.
 fn is_secure_request(headers: &HeaderMap) -> bool {
-    if std::env::var("CELLFORGE_COOKIE_SECURE").ok().as_deref() == Some("1") {
+    if crate::routes::behind_proxy_mode("CELLFORGE_COOKIE_SECURE") {
         return true;
     }
     headers
@@ -179,7 +179,9 @@ pub async fn register(
     };
     match state
         .users
-        .register(&req.username, &req.password, &display, &created_by)
+        // Bootstrap path (first user via /auth/register) — they pick
+        // their own password, so no must-change-on-next-login flag.
+        .register(&req.username, &req.password, &display, &created_by, false)
     {
         Ok(user) => {
             if is_first {
@@ -378,7 +380,15 @@ pub async fn change_password(
             .into_response();
     }
 
-    match state.users.change_password(&target, &req.new_password) {
+    // must_change_password flag: set when an admin resets someone ELSE's
+    // password (the new value is again a one-shot the target user has to
+    // replace on next login). Cleared when the user changes their own
+    // password — that's the moment they "own" their credential.
+    let must_change = target != caller;
+    match state
+        .users
+        .change_password(&target, &req.new_password, must_change)
+    {
         Ok(()) => Json(AuthResponse {
             ok: true,
             error: None,

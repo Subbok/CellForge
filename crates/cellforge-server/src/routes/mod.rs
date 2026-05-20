@@ -25,19 +25,37 @@ use std::sync::Arc;
 pub struct AppConfig {
     notebook_dir: String,
     initial_notebook: Option<String>,
+    /// Whether the server was launched with `--hub`. The frontend uses this
+    /// to gate the Admin button in the nav (and the `/admin/*` API is itself
+    /// gated by `require_hub` middleware on the backend). Without hub mode,
+    /// basic user management still works through `/auth/users`; only the
+    /// group / resource-limit / kernel-monitoring surface is hidden.
+    hub_mode: bool,
+}
+
+/// Shortcut: `CELLFORGE_BEHIND_PROXY=1` flips on both `COOKIE_SECURE` and
+/// `TRUST_XFF` because every reverse-proxy deployment wants both, and asking
+/// operators to set the pair separately in every compose file got old fast.
+/// Specific vars still win when explicit — if you set `CELLFORGE_TRUST_XFF=0`
+/// alongside `CELLFORGE_BEHIND_PROXY=1`, the explicit "off" sticks.
+pub fn behind_proxy_mode(specific_var: &str) -> bool {
+    match std::env::var(specific_var) {
+        Ok(v) => v == "1",
+        Err(_) => std::env::var("CELLFORGE_BEHIND_PROXY").ok().as_deref() == Some("1"),
+    }
 }
 
 /// Best-effort client identifier string for logging and rate-limit keying.
 /// Reads `X-Forwarded-For` ONLY when the operator has explicitly set
-/// `CELLFORGE_TRUST_XFF=1` — otherwise any request could spoof the header.
-/// The env-var opt-in assumes the operator has put a trusted proxy in front
-/// (Cloudflare Tunnel, nginx, Traefik) that strips client-supplied XFF and
-/// sets its own.
+/// `CELLFORGE_TRUST_XFF=1` (or the umbrella `CELLFORGE_BEHIND_PROXY=1`) —
+/// otherwise any request could spoof the header. The env-var opt-in assumes
+/// the operator has put a trusted proxy in front (Cloudflare Tunnel, nginx,
+/// Traefik) that strips client-supplied XFF and sets its own.
 /// Returns `"unknown"` when no trustworthy source is available — callers
 /// should treat that string as an opaque bucket (all "unknown" clients share
 /// one rate-limit slot, which is fine for a v1 implementation).
 pub fn client_ip(headers: &HeaderMap) -> String {
-    if std::env::var("CELLFORGE_TRUST_XFF").ok().as_deref() == Some("1")
+    if behind_proxy_mode("CELLFORGE_TRUST_XFF")
         && let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
         && let Some(first) = xff.split(',').next()
     {
@@ -182,5 +200,6 @@ pub async fn config(
             .initial_notebook
             .as_ref()
             .map(|p| p.to_string_lossy().into()),
+        hub_mode: state.hub_mode,
     })
 }

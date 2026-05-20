@@ -69,15 +69,21 @@ export const useNotebookStore = create<NotebookState>((set) => ({
     // all derive from `cell.id`, so undefined ids make every editor mirror
     // the first cell. Mint a fresh uuid for any cell that arrived without
     // one; the next save persists them so this only happens once per file.
-    const cells = nb.cells.map(c => ({
-      ...c,
-      id: c.id || uuid(),
-      source: Array.isArray(c.source) ? (c.source as string[]).join('') : c.source,
-      outputs: c.outputs ?? [],
-      execution_count: c.execution_count ?? null,
-      status: 'idle' as const,
-      execTimeMs: null,
-    }));
+    const cells = nb.cells.map(c => {
+      // Per-cell CellForge metadata namespace — used to round-trip values
+      // Jupyter doesn't define a slot for (execTimeMs is the obvious one;
+      // future additions like a reactive-skip marker land here too).
+      const cf = (c.metadata?.cellforge as { exec_time_ms?: number } | undefined);
+      return {
+        ...c,
+        id: c.id || uuid(),
+        source: Array.isArray(c.source) ? (c.source as string[]).join('') : c.source,
+        outputs: c.outputs ?? [],
+        execution_count: c.execution_count ?? null,
+        status: 'idle' as const,
+        execTimeMs: typeof cf?.exec_time_ms === 'number' ? cf.exec_time_ms : null,
+      };
+    });
     set({
       filePath: path,
       metadata: nb.metadata,
