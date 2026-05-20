@@ -176,10 +176,25 @@ function chartMaxWidth(d: VizBase): string {
   return `${Math.round(base * scale)}%`;
 }
 
-/** Resolve the color for item i: user-specified color > user-specified colors[i] > palette fallback */
+// Accept only well-formed color tokens: hex, rgb()/rgba(), hsl()/hsla(),
+// CSS named colors, or `var(--cellforge-token)`. Anything else flows through
+// from a notebook cell unchecked — and these strings land inside `fill="…"`
+// attributes via template literals, so e.g. `color: '"red" onload="..."'`
+// would have been an XSS vector for collaborators viewing the output.
+// Bound the length so a pathological 100 KB "color" can't slow the regex.
+const COLOR_RE =
+  /^(?:#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([\d\s,.%/]+\)|hsla?\([\d\s,.%/]+\)|[a-z][a-z0-9-]*|var\(--[a-z0-9-]+\))$/i;
+
+function isSafeColor(s: unknown): s is string {
+  return typeof s === 'string' && s.length <= 64 && COLOR_RE.test(s.trim());
+}
+
+/** Resolve the color for item i: user-specified colors[i] > user-specified color > palette fallback.
+ *  Untrusted strings (anything not matching `COLOR_RE`) silently fall through to the palette. */
 function pickColor(d: VizBase, i: number): string {
-  if (d.colors && d.colors[i]) return d.colors[i];
-  if (d.color) return d.color;
+  const perItem = d.colors && d.colors[i];
+  if (isSafeColor(perItem)) return perItem;
+  if (isSafeColor(d.color)) return d.color;
   return PALETTE[i % PALETTE.length];
 }
 

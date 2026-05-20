@@ -677,7 +677,11 @@ impl UserDb {
     /// shouldn't strand a half-deleted user in the DB. Workspace removal
     /// happens before the row delete so the dangling path can never get
     /// orphaned (lookup by `username` would 404 mid-cleanup).
-    pub fn delete_user(&self, username: &str, force: bool) -> Result<()> {
+    /// Returns `Ok(true)` if a row was removed, `Ok(false)` if the user
+    /// didn't exist OR the role guard rejected the delete (e.g. an admin
+    /// passed `force=false`). The caller is expected to differentiate so
+    /// silent "delete succeeded but did nothing" UX bugs don't slip past.
+    pub fn delete_user(&self, username: &str, force: bool) -> Result<bool> {
         // Capture the workspace path BEFORE we drop the row — afterwards
         // get_user would 404. Also serves as a precondition check: a
         // missing user is a no-op, not an error.
@@ -705,7 +709,7 @@ impl UserDb {
             // delete. Nothing else to clean up — bail without touching
             // disk or related tables.
             tx.rollback()?;
-            return Ok(());
+            return Ok(false);
         }
 
         // Cascade DB rows. None of these are critical-path; orphans are
@@ -744,7 +748,7 @@ impl UserDb {
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// True iff `username` is the bootstrap admin — the user with `id = 1`,

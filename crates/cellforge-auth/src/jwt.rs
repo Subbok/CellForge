@@ -27,29 +27,82 @@ fn secret() -> &'static [u8] {
         let dir = cellforge_config::config_dir();
         let key_path = dir.join("jwt_secret");
 
-        if let Ok(key) = std::fs::read(&key_path)
-            && key.len() >= 32
-        {
-            return key;
+        // Try to read an existing key. Three branches matter:
+        //  - long-enough file → reuse it (the normal path)
+        //  - file present but too short → DO NOT overwrite. A short file is
+        //    either a partial write from a previous crash or another process
+        //    mid-creation. Silently regenerating would invalidate every live
+        //    session AND race with the other writer, so we panic with a clear
+        //    message telling the operator what to do.
+        //  - NotFound → fall through to generation
+        match std::fs::read(&key_path) {
+            Ok(key) if key.len() >= 32 => return key,
+            Ok(key) => {
+                panic!(
+                    "JWT secret at {} is only {} bytes (need ≥32). Refusing to \
+                    overwrite — remove the file manually to regenerate (every \
+                    active session will be logged out) or restore from backup.",
+                    key_path.display(),
+                    key.len()
+                );
+            }
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                panic!(
+                    "could not read jwt_secret at {}: {e}",
+                    key_path.display()
+                );
+            }
+            Err(_) => {} // NotFound — generate below
         }
 
         let mut key = vec![0u8; 64];
         getrandom::fill(&mut key).expect("getrandom failed — system entropy pool unavailable");
         let _ = std::fs::create_dir_all(&dir);
-        if let Err(e) = std::fs::write(&key_path, &key) {
-            tracing::error!(
-                "could not persist jwt_secret to {}: {e}",
-                key_path.display()
-            );
-        } else {
-            // chmod 0600 so only the server user can read it
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+
+        // Atomic install: write to a sibling temp file with restrictive perms,
+        // then `hard_link` it into place. `hard_link` refuses if the target
+        // already exists — so if a second server instance won the startup race
+        // we don't overwrite its secret; we read its key back instead.
+        let tmp_path = dir.join(format!(
+            "jwt_secret.{}.{}.tmp",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+
+        if let Err(e) = std::fs::write(&tmp_path, &key) {
+            tracing::error!("could not stage jwt_secret tmp at {}: {e}", tmp_path.display());
+            return key;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600));
+        }
+        match std::fs::hard_link(&tmp_path, &key_path) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&tmp_path);
+                key
+            }
+            Err(_) => {
+                // Lost the race; another instance created the file. Use its
+                // key so both processes agree on the same secret — otherwise
+                // tokens minted by one would fail verification by the other.
+                let _ = std::fs::remove_file(&tmp_path);
+                match std::fs::read(&key_path) {
+                    Ok(other) if other.len() >= 32 => other,
+                    _ => {
+                        tracing::error!(
+                            "lost jwt_secret race but winner's file at {} is unreadable",
+                            key_path.display()
+                        );
+                        key
+                    }
+                }
             }
         }
-        key
     })
 }
 

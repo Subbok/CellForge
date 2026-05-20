@@ -144,6 +144,26 @@ async fn active_user_check(
     next.run(req).await
 }
 
+/// Middleware: reject any request without a valid JWT cookie. Applied via
+/// `route_layer` to the private branch of the API router (everything except
+/// `/health`, `/auth/status`, `/auth/login`, `/auth/register`). Stops the
+/// "auth enforced by frontend only" hole where every handler had to defend
+/// itself with `extract_user` and a couple historically didn't.
+async fn require_auth(
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if crate::routes::auth::extract_claims(req.headers()).is_none() {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            "authentication required",
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
 /// Origin-header check middleware. State-changing requests (POST/PUT/DELETE/PATCH)
 /// must either (a) be same-origin with the server (Origin's host:port matches
 /// the request's `Host` header) OR (b) come from one of the configured
@@ -197,12 +217,23 @@ async fn origin_check(
 }
 
 fn build_api_router() -> Router<Arc<AppState>> {
-    Router::new()
+    // Public routes — reachable without a JWT cookie.
+    // `/health` for monitoring/uptime probes; the three `/auth` entries cover
+    // the login flow itself (status tells the UI whether bootstrap is needed,
+    // login mints the cookie, register handles first-user bootstrap and admin
+    // create-user — register's own handler decides whether to require an admin
+    // caller based on whether any users exist yet).
+    let public = Router::new()
         .route("/health", get(health_handler))
-        // auth -- no JWT required
         .route("/auth/status", get(auth::status))
         .route("/auth/login", axum::routing::post(auth::login))
-        .route("/auth/register", axum::routing::post(auth::register))
+        .route("/auth/register", axum::routing::post(auth::register));
+
+    // Private routes — every entry below requires a valid JWT cookie. The
+    // `require_auth` layer rejects with 401 before the handler runs, so
+    // individual handlers no longer need to repeat the check (a few still
+    // use `extract_user` to learn *who* the caller is, which is fine).
+    let private = Router::new()
         .route("/auth/me", get(auth::me))
         .route("/auth/logout", axum::routing::post(auth::logout))
         .route("/auth/users", get(auth::list_users))
@@ -214,7 +245,6 @@ fn build_api_router() -> Router<Arc<AppState>> {
             "/auth/change-password",
             axum::routing::post(auth::change_password),
         )
-        // everything below needs auth (enforced by frontend for now)
         .route("/config", get(routes::config))
         .route("/notebooks", get(notebooks::list).post(notebooks::create))
         .route("/notebooks/open", axum::routing::post(notebooks::open_path))
@@ -340,6 +370,11 @@ fn build_api_router() -> Router<Arc<AppState>> {
         .route("/git/status", get(git::status))
         .route("/ws", get(ws_handler))
         .route("/collab", get(crate::ws::collab::collab_handler))
+        // `route_layer` (vs `layer`) only wraps the routes registered on this
+        // Router — `public.merge(private)` keeps the public branch unwrapped.
+        .route_layer(axum::middleware::from_fn(require_auth));
+
+    public.merge(private)
 }
 
 /// Start the CellForge server on the given listener with the provided config.

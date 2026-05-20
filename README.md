@@ -2,7 +2,7 @@
 
 > A modern notebook IDE — Rust backend, React frontend, real Jupyter kernels, reactive execution, and PDF export via Typst.
 
-![version](https://img.shields.io/badge/version-1.2.5-blue)
+![version](https://img.shields.io/badge/version-1.3.0-blue)
 ![rust](https://img.shields.io/badge/rust-2024-orange)
 ![react](https://img.shields.io/badge/react-19-61dafb)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-green)
@@ -63,9 +63,9 @@ You need at least one Jupyter kernel installed: `pip install ipykernel`
 - **Any Jupyter kernel** — Python, R, Julia, JavaScript, Kotlin, Go, and anything that speaks the Jupyter wire protocol. Auto-detects conda envs, venvs, and system installs.
 - **Real-time collaboration** — open the same notebook in several tabs, devices, or user accounts (via file sharing); edits, cursors, cell ops, and outputs stay in sync via Yjs CRDT. Collaborators share one kernel process per language, so variables, execution state, and iopub streams converge across users.
 - **Reactive execution** — AST-based cell dependency DAG, auto-reruns downstream cells on change.
-- **Built-in viz library** — `import cellforge as cf` — charts, diagrams, widgets, progress bars. No pip install. [Docs](https://github.com/Subbok/cellforge/wiki/Built-in-Library)
-- **PDF export via embedded Typst** — no LaTeX, no external tools. Custom `.typ` templates. [Docs](https://github.com/Subbok/cellforge/wiki/Writing-Typst-Templates)
-- **Plugin system** — themes, Python helpers, custom renderers, toolbar buttons, sidebar panels, keybindings. [Docs](https://github.com/Subbok/cellforge/wiki/Writing-Plugins)
+- **Built-in viz library** — `import cellforge as cf` — charts, diagrams, widgets, progress bars. No pip install. [Docs](https://github.com/Subbok/CellForge/wiki/Built-in-Library)
+- **PDF export via embedded Typst** — no LaTeX, no external tools. Custom `.typ` templates. [Docs](https://github.com/Subbok/CellForge/wiki/Writing-Typst-Templates)
+- **Plugin system** — themes, Python helpers, custom renderers, toolbar buttons, sidebar panels, keybindings. [Docs](https://github.com/Subbok/CellForge/wiki/Writing-Plugins)
 - **Per-kernel sandboxing** — each kernel runs in a bubblewrap jail with mount, PID, and network isolation on Linux; graceful fallback when kernel namespaces are unavailable (Docker default, restricted hosts). [Docs](https://github.com/Subbok/CellForge/wiki/Deployment-Security)
 - **Multi-user** — SQLite accounts, JWT auth with session invalidation, bcrypt with constant-time fallback, per-user workspaces, file sharing with live collab, admin panel, per-group resource limits. Single binary, no JupyterHub.
 
@@ -133,7 +133,7 @@ CellForge auto-detects conda envs, venvs, and system Python — no manual config
 
 ## Architecture
 
-Rust workspace with 9 crates: `cellforge-server` (Axum HTTP/WS), `cellforge-kernel` (Jupyter/ZeroMQ), `cellforge-notebook` (ipynb format), `cellforge-reactive` (cell DAG), `cellforge-varexplorer` (runtime introspection), `cellforge-export` (Typst PDF), `cellforge-auth` (SQLite/JWT), `cellforge-config` (XDG paths), `cellforge-app` (desktop wrapper via wry/tao).
+Rust workspace with 10 crates: `cellforge-server` (Axum HTTP/WS), `cellforge-kernel` (Jupyter/ZeroMQ), `cellforge-notebook` (ipynb format), `cellforge-reactive` (cell DAG), `cellforge-varexplorer` (runtime introspection), `cellforge-export` (Typst PDF), `cellforge-auth` (SQLite/JWT), `cellforge-data` (CSV/JSONL/JSON/Parquet preview), `cellforge-config` (XDG paths), `cellforge-app` (desktop wrapper via wry/tao).
 
 Frontend: React 19 + TypeScript + Monaco + Yjs + Zustand + Tailwind v4.
 

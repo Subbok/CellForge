@@ -178,6 +178,24 @@ pub async fn rename(
     Ok(Json(serde_json::json!({"path": rel})))
 }
 
+/// Per-cell source cap when serialising into `file_history.changed_cells`.
+/// A 32 MiB notebook with rich edits could otherwise push ~64 MiB into a
+/// single history row (old + new source) on every save. 4 KiB keeps enough
+/// to read the change in the activity feed; longer sources are truncated
+/// at a UTF-8 boundary with a tag showing how much was elided.
+const HISTORY_CELL_SOURCE_CAP: usize = 4 * 1024;
+
+fn truncate_for_history(s: &str) -> String {
+    if s.len() <= HISTORY_CELL_SOURCE_CAP {
+        return s.to_string();
+    }
+    let mut cut = HISTORY_CELL_SOURCE_CAP;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}…[truncated, {} more bytes]", &s[..cut], s.len() - cut)
+}
+
 /// Compare two notebook snapshots and return JSON describing cell-level changes.
 fn compute_cell_changes(old_json: &str, new_json: &str) -> String {
     let old: serde_json::Value = serde_json::from_str(old_json).unwrap_or_default();
@@ -226,7 +244,8 @@ fn compute_cell_changes(old_json: &str, new_json: &str) -> String {
                 );
                 changes.push(serde_json::json!({
                     "cell_id": id, "change": "edited", "summary": summary,
-                    "old_source": old_src, "new_source": new_src,
+                    "old_source": truncate_for_history(&old_src),
+                    "new_source": truncate_for_history(&new_src),
                 }));
             }
         } else {
@@ -239,7 +258,7 @@ fn compute_cell_changes(old_json: &str, new_json: &str) -> String {
                 .collect::<String>();
             changes.push(serde_json::json!({
                 "cell_id": id, "change": "added", "summary": preview,
-                "new_source": new_src,
+                "new_source": truncate_for_history(&new_src),
             }));
         }
     }
@@ -256,7 +275,7 @@ fn compute_cell_changes(old_json: &str, new_json: &str) -> String {
                 .collect::<String>();
             changes.push(serde_json::json!({
                 "cell_id": id, "change": "deleted", "summary": preview,
-                "old_source": cell_source(old_cell),
+                "old_source": truncate_for_history(&cell_source(old_cell)),
             }));
         }
     }

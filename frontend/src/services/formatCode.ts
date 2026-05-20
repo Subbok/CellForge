@@ -1,7 +1,11 @@
 import { ws } from './websocket';
 import type { WsMessage } from '../lib/types';
 
-let pending: ((formatted: string | null) => void) | null = null;
+// Pending format request — nonce binds the marker to THIS request so a
+// compromised kernel (or any stream output that happens to start with
+// "__cf_fmt:") can't hand us back arbitrary text and have us write it
+// into the user's cell.
+let pending: { nonce: string; resolve: (formatted: string | null) => void } | null = null;
 
 let _setup = false;
 export function setupFormatHandler() {
@@ -12,8 +16,9 @@ export function setupFormatHandler() {
     if (!pending) return;
     const content = msg.payload?.content as Record<string, unknown> | undefined;
     const text = String(content?.text ?? '');
-    if (text.startsWith('__cf_fmt:')) {
-      pending(text.slice('__cf_fmt:'.length));
+    const marker = `__cf_fmt_${pending.nonce}:`;
+    if (text.startsWith(marker)) {
+      pending.resolve(text.slice(marker.length));
       pending = null;
     }
   });
@@ -21,7 +26,8 @@ export function setupFormatHandler() {
 
 export function formatPythonCode(code: string): Promise<string | null> {
   return new Promise(resolve => {
-    pending = resolve;
+    const nonce = crypto.randomUUID().replace(/-/g, '');
+    pending = { nonce, resolve };
 
     // encode the code as base64 to avoid any quoting issues
     const b64 = btoa(unescape(encodeURIComponent(code)));
@@ -32,16 +38,16 @@ __cf_code = __b64.b64decode("${b64}").decode("utf-8")
 try:
     import black
     __cf_r = black.format_str(__cf_code, mode=black.Mode())
-    print("__cf_fmt:" + __cf_r, end="")
+    print("__cf_fmt_${nonce}:" + __cf_r, end="")
 except ImportError:
     try:
         import autopep8
         __cf_r = autopep8.fix_code(__cf_code)
-        print("__cf_fmt:" + __cf_r, end="")
+        print("__cf_fmt_${nonce}:" + __cf_r, end="")
     except ImportError:
-        print("__cf_fmt:" + __cf_code, end="")
+        print("__cf_fmt_${nonce}:" + __cf_code, end="")
 except Exception as __e:
-    print("__cf_fmt:" + __cf_code, end="")
+    print("__cf_fmt_${nonce}:" + __cf_code, end="")
 finally:
     del __b64, __cf_code
     for __n in ['__cf_r', 'black', 'autopep8', '__e']:
@@ -55,7 +61,12 @@ finally:
     });
 
     setTimeout(() => {
-      if (pending) { pending(null); pending = null; }
+      // Only clear if it's still THIS request — user may have kicked off a
+      // second format that replaced `pending`, and we shouldn't null theirs.
+      if (pending?.nonce === nonce) {
+        pending.resolve(null);
+        pending = null;
+      }
     }, 5000);
   });
 }

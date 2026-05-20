@@ -324,8 +324,20 @@ pub async fn delete_user(
         // Hard rule: nothing inside the app can remove the workspace owner.
         return StatusCode::FORBIDDEN;
     }
-    let _ = state.users.delete_user(&username, caller.is_super_admin);
-    StatusCode::NO_CONTENT
+    match state.users.delete_user(&username, caller.is_super_admin) {
+        Ok(true) => StatusCode::NO_CONTENT,
+        // Got Ok(false) — the row count was zero. The handler's own checks
+        // above already ruled out "user missing" and "non-super-admin
+        // touching an admin", so reaching here means the target's role
+        // changed between our `get_user` and the delete (e.g. concurrent
+        // promote-to-admin). 409 conveys that the request was valid but
+        // the target's state moved out from under it.
+        Ok(false) => StatusCode::CONFLICT,
+        Err(e) => {
+            tracing::warn!("delete_user({username}) failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 #[derive(Deserialize)]

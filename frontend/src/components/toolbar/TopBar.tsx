@@ -61,8 +61,16 @@ function ChipButton({
 export function TopBar({ onExport, onSwitchKernel }: {
   onExport: () => void; onSwitchKernel: () => void;
 }) {
-  const { cells, activeCellId, dirty } = useNotebookStore();
-  const { status, spec, availableSpecs } = useKernelStore();
+  // Per-field selectors instead of destructuring the whole store — pulling
+  // the whole store via `useNotebookStore()` re-renders TopBar on every
+  // keystroke (every Yjs cell-edit update bumps the store reference even
+  // when none of these three fields actually changed).
+  const cells = useNotebookStore(s => s.cells);
+  const activeCellId = useNotebookStore(s => s.activeCellId);
+  const dirty = useNotebookStore(s => s.dirty);
+  const status = useKernelStore(s => s.status);
+  const spec = useKernelStore(s => s.spec);
+  const availableSpecs = useKernelStore(s => s.availableSpecs);
   const sidebarOpen = useUIStore(s => s.sidebarOpen);
   const toggleSidebar = useUIStore(s => s.toggleSidebar);
   const sidebarSide = useUIStore(s => s.sidebarSide);

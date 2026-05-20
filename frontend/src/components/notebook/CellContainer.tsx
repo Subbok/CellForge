@@ -301,7 +301,19 @@ export const CellContainer = memo(function CellContainer({ cell, index }: { cell
                 onContextMenu={e => outputContextMenu(e, e.currentTarget as HTMLElement)}
               >
                 <div className={appMode ? '' : 'px-3 py-2'}>
-                  {cell.outputs.map((out, i) => <CellOutput key={i} output={out} cellId={cell.id} searchQuery={searchQuery} />)}
+                  {cell.outputs.map((out, i) => (
+                    // Tying the key to the current execution_count means that
+                    // when a rerun swaps the outputs out (`clear_output` or a
+                    // fresh execute), React fully remounts the children
+                    // instead of reusing index-i nodes — keeps iframes from
+                    // showing the previous run's HTML until they re-render.
+                    <CellOutput
+                      key={`${cell.execution_count ?? 'pre'}-${out.output_type}-${i}`}
+                      output={out}
+                      cellId={cell.id}
+                      searchQuery={searchQuery}
+                    />
+                  ))}
                 </div>
               </div>
             )}

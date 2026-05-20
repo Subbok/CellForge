@@ -253,8 +253,14 @@ fn parse_wire_msg(frames: &[Vec<u8>], key: &[u8]) -> Result<JupyterMessage> {
         mac.update(p);
         mac.update(m);
         mac.update(c);
-        let expected = hex::encode(mac.finalize().into_bytes());
-        if expected != String::from_utf8_lossy(sig) {
+        // The wire frame ships the HMAC hex-encoded — decode back to raw bytes
+        // and use `Mac::verify_slice` (constant-time) instead of comparing the
+        // hex strings byte-by-byte. Loopback ZeroMQ makes a timing side-channel
+        // a stretch, but `verify_slice` is the same call site with the right
+        // semantics and removes the question entirely.
+        let sig_str = std::str::from_utf8(sig).context("HMAC sig not utf8")?;
+        let sig_bytes = hex::decode(sig_str).context("HMAC sig not hex")?;
+        if mac.verify_slice(&sig_bytes).is_err() {
             bail!("HMAC mismatch");
         }
     }
@@ -268,8 +274,12 @@ fn parse_wire_msg(frames: &[Vec<u8>], key: &[u8]) -> Result<JupyterMessage> {
     })
 }
 
+/// Current UTC timestamp formatted as Jupyter expects in the message header
+/// `date` field — ISO 8601 with millisecond precision and a literal `Z`.
+/// Replaces a hardcoded "2025-01-01T00:00:00.000Z" that used to flow into
+/// every message regardless of when the request was actually sent.
 fn now_ish() -> String {
-    "2025-01-01T00:00:00.000Z".into()
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
 #[cfg(test)]

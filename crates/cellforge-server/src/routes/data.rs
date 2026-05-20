@@ -34,8 +34,8 @@ pub struct PreviewQuery {
 /// `GET /api/data/preview/{path}?offset=…&limit=…&sort_col=…&sort_dir=asc`
 ///
 /// Returns a chunk of the file at `{path}` (relative to the caller's
-/// workspace) plus an inferred schema. CSV-only for 1.2.5; JSONL/Parquet
-/// dispatch will land in 1.2.6.
+/// workspace) plus an inferred schema. `open_reader` dispatches by extension
+/// to the matching format reader (csv/tsv/txt, jsonl/ndjson/json, parquet).
 pub async fn preview(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

@@ -6,9 +6,9 @@
 //! virtualised table; this crate hides the per-format quirks behind one
 //! `DataReader` trait so the route layer stays format-agnostic.
 //!
-//! For 1.2.5 only `CsvReader` is implemented. JSONL and Parquet ship in a
-//! follow-up — the trait shape (`schema()`, `preview()`, `total_rows()`) is
-//! deliberately small enough that any row-oriented format will fit.
+//! The trait shape (`schema()`, `preview()`, `total_rows()`) is deliberately
+//! small enough that any row-oriented format fits; CSV, JSONL, JSON-array,
+//! and Parquet readers ship in-tree.
 
 pub mod csv;
 pub mod jsonl;

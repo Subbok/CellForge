@@ -31,8 +31,40 @@ pub fn read_notebook(path: &Path) -> Result<Notebook> {
 
 pub fn write_notebook(path: &Path, notebook: &Notebook) -> Result<()> {
     let content = serde_json::to_string_pretty(notebook).context("Failed to serialize notebook")?;
-    std::fs::write(path, content)
-        .with_context(|| format!("Failed to write notebook: {}", path.display()))?;
+
+    // Write to a sibling temp file, then rename onto the target. `rename` is
+    // atomic on POSIX and on Windows since Win10 (MoveFileExW). Keeping the
+    // temp in the same directory avoids crossing a filesystem boundary —
+    // cross-fs rename would fall back to a copy+delete and lose atomicity.
+    // The point: a crash mid-write can never leave a half-written ipynb on
+    // disk; the user either sees the old version or the fully-written new one.
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("notebook path has no parent: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("notebook path has no file name: {}", path.display()))?;
+    let tmp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        file_name.to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+
+    if let Err(e) = std::fs::write(&tmp_path, &content) {
+        return Err(anyhow::Error::from(e).context(format!(
+            "Failed to write temp notebook: {}",
+            tmp_path.display()
+        )));
+    }
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        // Best-effort cleanup so we don't leak a `.tmp` next to the target
+        // when the rename itself fails (e.g. permission, target locked).
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(anyhow::Error::from(e).context(format!(
+            "Failed to atomically replace notebook: {}",
+            path.display()
+        )));
+    }
     Ok(())
 }
 

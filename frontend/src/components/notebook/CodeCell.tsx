@@ -187,7 +187,10 @@ export function CodeCell({ cell, index }: { cell: Cell; index: number }) {
   return (
     <div ref={containerRef} className="relative">
       <Editor
-        key={`${cell.id}-${index}`}
+        // Key is cell.id only — putting `index` in the key forced Monaco to
+        // dispose+recreate the model on every reorder, dropping undo history,
+        // focus, and momentarily detaching the Yjs MonacoBinding.
+        key={cell.id}
         language={monacoLanguage(monacoLang)}
         // When collab is active, MonacoBinding owns the model — don't set value
         // as a controlled prop or it will fight with Yjs and reset cursors.

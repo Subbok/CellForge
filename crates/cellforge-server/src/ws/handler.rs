@@ -474,45 +474,50 @@ async fn handle_socket(
         .collect();
 
     for (lang, kid) in &all_kernels {
-        let should_stop = {
-            let km = state.kernels.lock().await;
-            if let Some(k) = km.get(kid) {
-                let refs = k.ref_count.fetch_sub(1, Ordering::Relaxed);
-                let is_busy = k.shared.status.lock().await.as_str() == "busy";
-                refs <= 1 && !is_busy
-            } else {
-                false
-            }
+        // Hold `state.kernels` from decrement → decision → stop. Releasing
+        // between fetch_sub and km.stop() let a fresh `subscribe_session_to_kernel`
+        // bump ref_count back up to 1 in the gap — and we'd still kill the
+        // kernel a live client was just attaching to. The reaper (`lib.rs`)
+        // uses the same hold-the-lock pattern; this brings the disconnect
+        // path in line.
+        let mut km = state.kernels.lock().await;
+        let should_stop = if let Some(k) = km.get(kid) {
+            let refs = k.ref_count.fetch_sub(1, Ordering::Relaxed);
+            let is_busy = k.shared.status.lock().await.as_str() == "busy";
+            refs <= 1 && !is_busy
+        } else {
+            false
         };
 
-        if should_stop {
-            // Drop THIS language's entry from the shared registry. Cross-user
-            // kernel sharing means any language kernel (not just the default)
-            // may be referenced from other sessions' maps — but the one we
-            // just decremented to zero means no one's holding it anymore, so
-            // remove our slot. Guard against races by checking that the
-            // registered id still matches ours before removing.
-            if let Some(ref nb_key) = sess.notebook_canonical {
-                let mut map = state.notebook_kernels.lock().await;
-                if let Some(inner) = map.get_mut(nb_key) {
-                    if inner.get(lang).map(|id| id == kid).unwrap_or(false) {
-                        inner.remove(lang);
-                    }
-                    if inner.is_empty() {
-                        map.remove(nb_key);
-                    }
+        if !should_stop {
+            drop(km);
+            tracing::info!("client disconnected, kernel {kid} ({lang}) still shared");
+            continue;
+        }
+
+        // Drop THIS language's entry from the shared registry. Cross-user
+        // kernel sharing means any language kernel (not just the default)
+        // may be referenced from other sessions' maps — but the one we
+        // just decremented to zero means no one's holding it anymore, so
+        // remove our slot. Guard against races by checking that the
+        // registered id still matches ours before removing.
+        if let Some(ref nb_key) = sess.notebook_canonical {
+            let mut map = state.notebook_kernels.lock().await;
+            if let Some(inner) = map.get_mut(nb_key) {
+                if inner.get(lang).map(|id| id == kid).unwrap_or(false) {
+                    inner.remove(lang);
+                }
+                if inner.is_empty() {
+                    map.remove(nb_key);
                 }
             }
-            // Remove the kernel session from the DB
-            if let Err(e) = state.users.remove_kernel_session(kid) {
-                tracing::warn!("failed to remove kernel session {kid}: {e}");
-            }
-            let mut km = state.kernels.lock().await;
-            let _ = km.stop(kid).await;
-            tracing::info!("last client gone, kernel {kid} ({lang}) stopped");
-        } else {
-            tracing::info!("client disconnected, kernel {kid} ({lang}) still shared");
         }
+        // Remove the kernel session from the DB
+        if let Err(e) = state.users.remove_kernel_session(kid) {
+            tracing::warn!("failed to remove kernel session {kid}: {e}");
+        }
+        let _ = km.stop(kid).await;
+        tracing::info!("last client gone, kernel {kid} ({lang}) stopped");
     }
 }
 
