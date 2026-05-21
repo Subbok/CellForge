@@ -155,13 +155,22 @@ export function AdminPanel({ callerIsSuperAdmin }: { callerIsSuperAdmin: boolean
   const refresh = useCallback(async () => {
     setError('');
     try {
-      const [s, u, g, k] = await Promise.all([
-        api.getAdminStats(), api.getAdminUsers(), api.getAdminGroups(), api.getAdminKernels(),
-      ]);
-      setStats(s); setUsers(u); setGroups(g); setKernels(k);
+      // Stats + users are always available (basic admin surface). Groups +
+      // kernels live behind require_hub middleware and 403 in non-hub mode.
+      // Promise.all fail-fasts on any rejection, so calling all four
+      // unconditionally would 403-out the whole batch and leave the
+      // Members table empty for non-hub admins. Gate the hub-only calls.
+      const [s, u] = await Promise.all([api.getAdminStats(), api.getAdminUsers()]);
+      setStats(s); setUsers(u);
+      if (hubMode) {
+        const [g, k] = await Promise.all([api.getAdminGroups(), api.getAdminKernels()]);
+        setGroups(g); setKernels(k);
+      } else {
+        setGroups([]); setKernels([]);
+      }
     } catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
     setLoading(false);
-  }, []);
+  }, [hubMode]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh(); }, [refresh]);
