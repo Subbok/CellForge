@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fontsource/geist": "^5.2.5",
+    "@fontsource/geist": "^5.2.9",
     "@fontsource/jetbrains-mono": "^5.2.5",
     "@fontsource/space-grotesk": "^5.2.5",
     "@monaco-editor/react": "^4.7.0",
@@ -37,7 +37,7 @@
     "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^25.8.0",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "eslint": "^10.3.0",
@@ -47,6 +47,6 @@
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.59.3",
-    "vite": "^8.0.13"
+    "vite": "^8.0.14"
   }
 }
