@@ -498,14 +498,21 @@ function App() {
           if (pending) {
             saveCurrentTab();
             // Persist the chosen kernel so the notebook remembers it next time.
+            // Build a new notebook object rather than mutating the state value.
             const spec = useKernelStore.getState().availableSpecs.find(s => s.name === kernelName);
-            pending.nb.metadata.kernelspec = {
-              name: kernelName,
-              display_name: spec?.display_name ?? kernelName,
-              language: spec?.language,
+            const nb = {
+              ...pending.nb,
+              metadata: {
+                ...pending.nb.metadata,
+                kernelspec: {
+                  name: kernelName,
+                  display_name: spec?.display_name ?? kernelName,
+                  language: spec?.language,
+                },
+              },
             };
-            api.saveNotebook(pending.path, pending.nb).catch(() => {});
-            useNotebookStore.getState().loadNotebook(pending.path, pending.nb);
+            api.saveNotebook(pending.path, nb).catch(() => {});
+            useNotebookStore.getState().loadNotebook(pending.path, nb);
             const name = pending.path.split('/').pop() ?? 'Untitled';
             useTabStore.getState().addTab(pending.path, name, kernelName);
             initCollaboration(pending.path, user?.username ?? 'anonymous');

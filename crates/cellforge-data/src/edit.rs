@@ -42,7 +42,9 @@ pub fn set_csv_cell(path: &Path, row: usize, col: usize, value: &str) -> Result<
     fields[col] = value.to_string();
     *rec = csv::StringRecord::from(fields);
 
-    let mut wtr = csv::WriterBuilder::new().delimiter(delimiter).from_path(path)?;
+    let mut wtr = csv::WriterBuilder::new()
+        .delimiter(delimiter)
+        .from_path(path)?;
     wtr.write_record(&headers)?;
     for r in &records {
         wtr.write_record(r)?;
@@ -139,7 +141,10 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn tmp(ext: &str, body: &str) -> NamedTempFile {
-        let f = tempfile::Builder::new().suffix(&format!(".{ext}")).tempfile().unwrap();
+        let f = tempfile::Builder::new()
+            .suffix(&format!(".{ext}"))
+            .tempfile()
+            .unwrap();
         write!(f.as_file(), "{body}").unwrap();
         f
     }
@@ -158,7 +163,10 @@ mod tests {
         let f = tmp("tsv", "a\tb\n1\tx\n2\ty\n");
         set_csv_cell(f.path(), 1, 1, "ZZ").unwrap();
         let out = std::fs::read_to_string(f.path()).unwrap();
-        assert!(out.contains("2\tZZ"), "tab-separated write expected, got: {out}");
+        assert!(
+            out.contains("2\tZZ"),
+            "tab-separated write expected, got: {out}"
+        );
     }
 
     #[test]

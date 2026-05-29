@@ -495,8 +495,7 @@ async fn move_path_moves_across_folders() {
 
 #[tokio::test]
 async fn template_source_missing_returns_404() {
-    let app = Router::new()
-        .route("/api/templates/{name}/source", get(export::template_source));
+    let app = Router::new().route("/api/templates/{name}/source", get(export::template_source));
 
     let req = Request::builder()
         .uri("/api/templates/definitely-not-a-real-template-xyz/source")

@@ -577,8 +577,7 @@ mod tests {
         fs::write(dir.join("myfolder/a.txt"), b"hello").unwrap();
         fs::write(dir.join("myfolder/sub/b.txt"), b"world").unwrap();
 
-        let (bytes, filename) =
-            build_zip_archive(dir, &["myfolder".to_string()]).unwrap();
+        let (bytes, filename) = build_zip_archive(dir, &["myfolder".to_string()]).unwrap();
 
         assert!(!bytes.is_empty(), "archive should not be empty");
         assert_eq!(filename, "myfolder.zip");
@@ -587,8 +586,14 @@ mod tests {
         let names: Vec<String> = (0..archive.len())
             .map(|i| archive.by_index(i).unwrap().name().to_string())
             .collect();
-        assert!(names.contains(&"myfolder/a.txt".to_string()), "names={names:?}");
-        assert!(names.contains(&"myfolder/sub/b.txt".to_string()), "names={names:?}");
+        assert!(
+            names.contains(&"myfolder/a.txt".to_string()),
+            "names={names:?}"
+        );
+        assert!(
+            names.contains(&"myfolder/sub/b.txt".to_string()),
+            "names={names:?}"
+        );
     }
 
     #[test]
@@ -598,11 +603,8 @@ mod tests {
         fs::write(dir.join("a.txt"), b"a").unwrap();
         fs::write(dir.join("b.txt"), b"b").unwrap();
 
-        let (_, filename) = build_zip_archive(
-            dir,
-            &["a.txt".to_string(), "b.txt".to_string()],
-        )
-        .unwrap();
+        let (_, filename) =
+            build_zip_archive(dir, &["a.txt".to_string(), "b.txt".to_string()]).unwrap();
         assert_eq!(filename, "files.zip");
     }
 }

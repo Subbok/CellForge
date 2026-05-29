@@ -290,7 +290,10 @@ fn build_api_router() -> Router<Arc<AppState>> {
         .route("/sessions/{id}", delete(kernels::delete_session))
         .route("/export/pdf", axum::routing::post(export::export_pdf))
         .route("/export/typst", axum::routing::post(export::compile_typst))
-        .route("/export/typst/svg", axum::routing::post(export::compile_typst_svg))
+        .route(
+            "/export/typst/svg",
+            axum::routing::post(export::compile_typst_svg),
+        )
         .route(
             "/templates",
             get(export::list_templates).post(export::upload_template),
@@ -299,10 +302,7 @@ fn build_api_router() -> Router<Arc<AppState>> {
             "/templates/{name}",
             axum::routing::delete(export::delete_template),
         )
-        .route(
-            "/templates/{name}/source",
-            get(export::template_source),
-        )
+        .route("/templates/{name}/source", get(export::template_source))
         .route(
             "/templates/{name}/assets",
             axum::routing::post(export::upload_template_assets),

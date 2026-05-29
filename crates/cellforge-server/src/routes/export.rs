@@ -209,11 +209,10 @@ pub async fn compile_typst(Json(req): Json<TypstCompileReq>) -> Result<Response,
     let images: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let source = req.source;
 
-    let result = tokio::task::spawn_blocking(move || {
-        compile::compile_to_pdf(&source, &images, &assets)
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result =
+        tokio::task::spawn_blocking(move || compile::compile_to_pdf(&source, &images, &assets))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     match result {
         Ok(pdf) => Ok(([(header::CONTENT_TYPE, "application/pdf")], pdf).into_response()),
@@ -237,11 +236,10 @@ pub async fn compile_typst_svg(Json(req): Json<TypstCompileReq>) -> Result<Respo
     let images: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let source = req.source;
 
-    let result = tokio::task::spawn_blocking(move || {
-        compile::compile_to_svg(&source, &images, &assets)
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result =
+        tokio::task::spawn_blocking(move || compile::compile_to_svg(&source, &images, &assets))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     match result {
         Ok(pages) => Ok(Json(TypstSvgResponse { pages }).into_response()),
