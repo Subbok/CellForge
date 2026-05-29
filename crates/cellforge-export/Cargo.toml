@@ -20,5 +20,9 @@ comemo = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cellforge-config = { path = "../cellforge-config" }
 dirs = "6"
-typst-kit = { version = "0.14", default-features = false, features = ["downloads", "packages"] }
 typst-svg = "0.14"
+# @preview package download — ureq uses rustls by default (no OpenSSL), so the
+# release cross-builds for aarch64 don't need a system/cross OpenSSL toolchain.
+ureq = "2"
+flate2 = "1"
+tar = "0.4"

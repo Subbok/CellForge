@@ -1,17 +1,19 @@
 use anyhow::{Context, Result};
 use base64::Engine;
 use std::collections::HashMap;
+use std::io::Read;
+use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use typst::LibraryExt;
-use typst::diag::{FileError, FileResult};
+use typst::diag::{FileError, FileResult, PackageError};
 use typst::foundations::{Bytes, Datetime};
+use typst::syntax::package::PackageSpec;
 use typst::syntax::{FileId, Source, VirtualPath};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, World};
-use typst_kit::download::{Downloader, ProgressSink};
-use typst_kit::package::PackageStorage;
 
 /// Compile typst source to PDF bytes.
 /// `images` — notebook images (name → base64/svg), `assets` — template files (name → raw bytes)
@@ -59,9 +61,6 @@ struct CellForgeWorld {
     fonts: Vec<Font>,
     main: Source,
     files: HashMap<String, Bytes>,
-    /// Downloads + caches `@preview` packages on demand (standard typst cache
-    /// dir). Lets `#import "@preview/…"` work without a terminal.
-    packages: PackageStorage,
 }
 
 impl CellForgeWorld {
@@ -95,33 +94,89 @@ impl CellForgeWorld {
             files.insert(name.clone(), Bytes::new(data.clone()));
         }
 
-        // Default paths → the standard typst package cache (~/.cache/typst).
-        let packages = PackageStorage::new(None, None, Downloader::new("cellforge"));
-
         Ok(Self {
             library: LazyHash::new(Library::default()),
             book: LazyHash::new(book),
             fonts,
             main,
             files,
-            packages,
         })
     }
 
-    /// Resolve a file that belongs to a `@preview`/`@local` package, downloading
-    /// and caching the package on first use.
+    /// Resolve a file that belongs to a `@preview` package, downloading and
+    /// caching the package on first use.
     fn read_package_file(&self, id: FileId) -> FileResult<Bytes> {
         let spec = id
             .package()
             .ok_or_else(|| FileError::NotFound(id.vpath().as_rootless_path().into()))?;
-        let dir = self
-            .packages
-            .prepare_package(spec, &mut ProgressSink)
-            .map_err(FileError::Package)?;
+        let dir = ensure_package(spec).map_err(FileError::Package)?;
         let path = dir.join(id.vpath().as_rootless_path());
         let data = std::fs::read(&path).map_err(|e| FileError::from_io(e, &path))?;
         Ok(Bytes::new(data))
     }
+}
+
+/// Local cache directory for a package: `~/.cache/typst/packages/<ns>/<name>/<ver>`.
+fn package_dir(spec: &PackageSpec) -> Option<PathBuf> {
+    dirs::cache_dir().map(|c| {
+        c.join("typst")
+            .join("packages")
+            .join(spec.namespace.as_str())
+            .join(spec.name.as_str())
+            .join(spec.version.to_string())
+    })
+}
+
+/// Ensure a `@preview` package is available on disk (download + extract on
+/// first use), returning its directory. Uses a rustls HTTP client (ureq) so no
+/// OpenSSL is pulled into the build.
+fn ensure_package(spec: &PackageSpec) -> Result<PathBuf, PackageError> {
+    let dir = package_dir(spec).ok_or_else(|| PackageError::Other(Some("no cache dir".into())))?;
+    // A present manifest means the package is already extracted.
+    if dir.join("typst.toml").exists() {
+        return Ok(dir);
+    }
+    // Only the public @preview registry is fetchable over the network.
+    if spec.namespace != "preview" {
+        return Err(PackageError::NotFound(spec.clone()));
+    }
+
+    let url = format!(
+        "https://packages.typst.org/preview/{}-{}.tar.gz",
+        spec.name, spec.version
+    );
+    let resp = ureq::get(&url).call().map_err(|e| match &e {
+        ureq::Error::Status(404, _) => PackageError::NotFound(spec.clone()),
+        _ => PackageError::NetworkFailed(Some(e.to_string().into())),
+    })?;
+    let mut buf = Vec::new();
+    resp.into_reader()
+        .read_to_end(&mut buf)
+        .map_err(|e| PackageError::NetworkFailed(Some(e.to_string().into())))?;
+
+    // Extract into a unique temp dir, then rename into place so a crash or a
+    // concurrent compile never leaves a half-written package in the cache.
+    static TMP: AtomicU64 = AtomicU64::new(0);
+    let n = TMP.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.with_file_name(format!("{}.tmp.{}.{}", spec.version, std::process::id(), n));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| PackageError::Other(Some(e.to_string().into())))?;
+    let gz = flate2::read::GzDecoder::new(&buf[..]);
+    let unpack = tar::Archive::new(gz).unpack(&tmp);
+    if let Err(e) = unpack {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(PackageError::MalformedArchive(Some(e.to_string().into())));
+    }
+    if let Some(parent) = dir.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if dir.exists() {
+        // Another compile won the race — drop our copy and use theirs.
+        let _ = std::fs::remove_dir_all(&tmp);
+    } else if std::fs::rename(&tmp, &dir).is_err() {
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+    Ok(dir)
 }
 
 impl World for CellForgeWorld {
