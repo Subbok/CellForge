@@ -108,7 +108,9 @@ impl JsonlReader {
                 .map(|v| value_to_row(v, &self.schema))
                 .collect()),
             Source::Lines => {
-                let mut rows = Vec::with_capacity(limit);
+                // Cap the capacity hint — callers pass usize::MAX for "all
+                // rows" and Vec::with_capacity(usize::MAX) panics.
+                let mut rows = Vec::with_capacity(limit.min(4096));
                 let mut seen = 0usize;
                 for line in self.lines()? {
                     let line = line?;

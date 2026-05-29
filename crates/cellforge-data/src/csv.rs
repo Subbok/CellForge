@@ -14,19 +14,33 @@ const TYPE_SAMPLE_ROWS: usize = 1000;
 pub struct CsvReader {
     path: PathBuf,
     schema: Vec<ColumnSchema>,
+    /// Field separator — comma for `.csv`/`.txt`, tab for `.tsv`.
+    delimiter: u8,
     /// Cached row count. Computed lazily on first `total_rows()` /
     /// `preview()` with sort, since a full pass over a big CSV is expensive
     /// — pure paginated scrolling never needs it.
     total: Option<usize>,
 }
 
+/// Field separator inferred from the file extension: tab for `.tsv`, comma
+/// otherwise. Shared with the cell-edit write-back path so reads and writes
+/// agree on the delimiter.
+pub fn delimiter_for(path: &Path) -> u8 {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(e) if e.eq_ignore_ascii_case("tsv") => b'\t',
+        _ => b',',
+    }
+}
+
 impl CsvReader {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
-        let schema = infer_schema(&path)?;
+        let delimiter = delimiter_for(&path);
+        let schema = infer_schema(&path, delimiter)?;
         Ok(Self {
             path,
             schema,
+            delimiter,
             total: None,
         })
     }
@@ -35,6 +49,7 @@ impl CsvReader {
         csv::ReaderBuilder::new()
             .has_headers(true)
             .flexible(true)
+            .delimiter(self.delimiter)
             .from_path(&self.path)
             .with_context(|| format!("opening CSV {}", self.path.display()))
     }
@@ -70,7 +85,10 @@ impl CsvReader {
 
     fn preview_streaming(&self, offset: usize, limit: usize) -> Result<Vec<Vec<RowValue>>> {
         let mut rdr = self.reader()?;
-        let mut rows = Vec::with_capacity(limit);
+        // Cap the capacity hint: callers (e.g. stats) pass usize::MAX to mean
+        // "all rows", and Vec::with_capacity(usize::MAX) panics with capacity
+        // overflow. The vec still grows as needed past this hint.
+        let mut rows = Vec::with_capacity(limit.min(4096));
         for (i, record) in rdr.records().enumerate() {
             if i < offset {
                 // Even when skipping we have to consume the record to advance
@@ -160,10 +178,11 @@ fn cell_to_value(raw: &str, ty: ColumnType) -> RowValue {
     }
 }
 
-fn infer_schema(path: &Path) -> Result<Vec<ColumnSchema>> {
+fn infer_schema(path: &Path, delimiter: u8) -> Result<Vec<ColumnSchema>> {
     let mut rdr = csv::ReaderBuilder::new()
         .has_headers(true)
         .flexible(true)
+        .delimiter(delimiter)
         .from_path(path)
         .with_context(|| format!("opening CSV {}", path.display()))?;
 
@@ -318,6 +337,24 @@ mod tests {
             RowValue::Int(n) => assert_eq!(*n, 5),
             other => panic!("expected Int, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn preview_with_usize_max_limit_does_not_panic() {
+        // The stats route requests "all rows" via limit = usize::MAX. This used
+        // to panic in Vec::with_capacity(usize::MAX) (capacity overflow).
+        let f = write_csv("n\n1\n2\n3\n");
+        let mut r = CsvReader::open(f.path()).unwrap();
+        let p = r.preview(0, usize::MAX, None).unwrap();
+        assert_eq!(p.rows.len(), 3);
+    }
+
+    #[test]
+    fn preview_with_usize_max_limit_on_empty_file() {
+        let f = write_csv("n\n");
+        let mut r = CsvReader::open(f.path()).unwrap();
+        let p = r.preview(0, usize::MAX, None).unwrap();
+        assert_eq!(p.rows.len(), 0);
     }
 
     #[test]

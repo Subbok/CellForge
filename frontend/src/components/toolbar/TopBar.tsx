@@ -5,6 +5,7 @@ import {
   MoreHorizontal,
 } from 'lucide-react';
 import { useNotebookStore } from '../../stores/notebookStore';
+import { useTabStore } from '../../stores/tabStore';
 import { cellToIpynb } from '../../lib/serialize';
 import { useKernelStore } from '../../stores/kernelStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -69,6 +70,7 @@ export function TopBar({ onExport, onSwitchKernel }: {
   const cells = useNotebookStore(s => s.cells);
   const activeCellId = useNotebookStore(s => s.activeCellId);
   const dirty = useNotebookStore(s => s.dirty);
+  const activeTabKind = useTabStore(s => s.tabs.find(t => t.id === s.activeTabId)?.kind);
   const status = useKernelStore(s => s.status);
   const spec = useKernelStore(s => s.spec);
   const availableSpecs = useKernelStore(s => s.availableSpecs);
@@ -202,6 +204,13 @@ export function TopBar({ onExport, onSwitchKernel }: {
   const kernelLabel =
     availableSpecs.find(s => s.name === spec)?.display_name ?? spec ?? 'No kernel';
   const dotColor = kernelDotColor(status);
+
+  // Non-notebook tabs (Typst documents, data previews) don't use the notebook
+  // toolbar at all — the file name shows in the nav bar and each view carries
+  // its own controls. Render nothing so there's no empty bar.
+  if (activeTabKind && activeTabKind !== 'notebook') {
+    return null;
+  }
 
   return (
     <header

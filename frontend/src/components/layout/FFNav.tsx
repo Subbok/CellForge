@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Home, FolderOpen, FileText, Settings, Shield, Search, LogOut } from 'lucide-react';
+import { Home, FolderOpen, FileText, Sheet, Search, LogOut, Settings, Shield } from 'lucide-react';
+import { useTabStore } from '../../stores/tabStore';
 import { BrandMark } from '../brand/BrandMark';
 import { Wordmark } from '../brand/Wordmark';
 import { Avatar } from '../Avatar';
@@ -58,6 +59,15 @@ export function FFNav({ user, currentStage, hasOpenNotebook, onNav, onLogout, on
   const displayName = user?.display_name || user?.username || '';
   const initial = displayName.slice(0, 1).toUpperCase() || '?';
 
+  // When a non-notebook document (Typst, CSV/JSON preview) is open in the
+  // editor, show its name in the nav bar — those tabs have no notebook toolbar.
+  const activeDoc = useTabStore(s => {
+    const a = s.tabs.find(t => t.id === s.activeTabId);
+    return a && a.kind !== 'notebook' ? a : null;
+  });
+  const showDoc = currentStage === 'notebook' && !!activeDoc;
+  const DocIcon = activeDoc?.kind === 'typst' ? FileText : Sheet;
+
   return (
     <header
       className="h-[52px] shrink-0 flex items-center gap-3 px-4 border-b"
@@ -99,7 +109,20 @@ export function FFNav({ user, currentStage, hasOpenNotebook, onNav, onLogout, on
         })}
       </nav>
 
-      <div className="flex-1" />
+      {/* Active document name (Typst / data preview) — centered between the
+          nav items and the search box. */}
+      <div className="flex-1 flex items-center justify-center min-w-0 px-3">
+        {showDoc && (
+          <span
+            className="flex items-center gap-1.5 truncate text-[13px] font-medium text-text"
+            style={{ maxWidth: 380 }}
+            title={activeDoc!.path}
+          >
+            <DocIcon size={14} className="text-accent shrink-0" />
+            <span className="truncate">{activeDoc!.name}</span>
+          </span>
+        )}
+      </div>
 
       {/* Search ⌘K — opens the command palette. */}
       <button

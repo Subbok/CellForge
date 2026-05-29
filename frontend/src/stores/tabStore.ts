@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { uuid } from '../lib/uuid';
 
-export type TabKind = 'notebook' | 'data';
+export type TabKind = 'notebook' | 'data' | 'typst';
 
 export interface Tab {
   id: string;
@@ -24,6 +24,8 @@ interface TabState {
   /** Open a data viewer tab (CSV/TSV/JSONL/Parquet later). Path is relative
    *  to the user's workspace, same convention as notebook tabs. */
   addDataTab(path: string, name: string): string;
+  /** Open a Typst document editor tab for a workspace .typ file. */
+  addTypstTab(path: string, name: string): string;
   closeTab(id: string): void;
   setActiveTab(id: string): void;
   /** Drag-and-drop reorder: insert `dragId` immediately before `overId`. */
@@ -64,6 +66,20 @@ export const useTabStore = create<TabState>((set, get) => ({
     const id = uuid();
     set(s => ({
       tabs: [...s.tabs, { id, path, name, kind: 'data' }],
+      activeTabId: id,
+    }));
+    return id;
+  },
+
+  addTypstTab: (path, name) => {
+    const existing = get().tabs.find(t => t.path === path);
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return existing.id;
+    }
+    const id = uuid();
+    set(s => ({
+      tabs: [...s.tabs, { id, path, name, kind: 'typst' }],
       activeTabId: id,
     }));
     return id;

@@ -142,12 +142,16 @@ export const api = {
     const url = URL.createObjectURL(blob);
     triggerDownload(url, name);
   },
-  downloadZip: async (paths: string[]) => {
+  downloadZip: async (paths: string[]): Promise<{ blob: Blob; filename: string }> => {
     const res = await fetch(`${BASE}/files/download-zip`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paths }),
     });
-    return res.blob();
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') ?? '';
+    const match = /filename="?([^"]+)"?/.exec(cd);
+    const filename = match ? match[1] : 'files.zip';
+    return { blob, filename };
   },
   fileHistory: (path: string) => post<{ id: number; username: string; action: string; changed_cells: string; created_at: string }[]>('/files/history', { path }),
   historySnapshot: (id: number) => get<Record<string, unknown>>(`/files/history/${id}`),
@@ -171,6 +175,15 @@ export const api = {
       body: JSON.stringify({ old_path: oldPath, new_name: newName }),
     });
     if (!res.ok) throw new Error(`${res.status}`);
+  },
+  // Move a file/folder to a different location (drag-and-drop into a folder).
+  // `dest` is the full destination path relative to the workspace.
+  moveFile: async (src: string, dest: string) => {
+    const res = await fetch(`${BASE}/files/move`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src, dest }),
+    });
+    if (!res.ok) throw new Error(`move ${res.status}`);
   },
   extractZip: async (path: string) => {
     const res = await fetch(`${BASE}/files/extract-zip`, {
@@ -196,7 +209,85 @@ export const api = {
   getNotebook: (path: string) => get<Notebook>(`/notebooks/${path}`),
   openNotebookPath: (path: string) => post<Notebook>('/notebooks/open', { path }),
   saveNotebook: (path: string, nb: unknown) => put(`/notebooks/${path}`, nb),
-  createNotebook: (name?: string) => post<{ name: string; path: string }>('/notebooks', { name }),
+  // Compile arbitrary Typst source to a PDF (for the in-app editor preview).
+  // Returns the PDF blob on success, or the Typst error text on failure.
+  compileTypst: async (
+    source: string,
+    template?: string,
+  ): Promise<{ ok: boolean; pdf?: Blob; error?: string }> => {
+    const res = await fetch(`${BASE}/export/typst`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, template }),
+    });
+    if (res.ok) return { ok: true, pdf: await res.blob() };
+    return { ok: false, error: await res.text() };
+  },
+  // Update a single cell of a CSV/TSV or JSON/JSONL file. `row` is the file
+  // row index (header excluded); only valid for the unsorted/unfiltered view.
+  editDataCell: async (path: string, row: number, col: number, value: string): Promise<void> => {
+    const res = await fetch(`${BASE}/data/cell`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, row, col, value }),
+    });
+    if (!res.ok) throw new Error(`edit cell ${res.status}`);
+  },
+  // Read a workspace file's content as text (for the Typst document editor).
+  readFile: async (path: string): Promise<string> => {
+    const res = await fetch(`${BASE}/files/download`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    if (!res.ok) throw new Error(`read ${res.status}`);
+    return res.text();
+  },
+  // Write (create or overwrite) a workspace text file.
+  writeFile: async (path: string, content: string): Promise<void> => {
+    const res = await fetch(`${BASE}/files/write`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content }),
+    });
+    if (!res.ok) throw new Error(`write ${res.status}`);
+  },
+  // Compile Typst to one SVG string per page — for the editor's chrome-free
+  // preview. Returns pages on success, or the Typst error text on failure.
+  compileTypstSvg: async (
+    source: string,
+    template?: string,
+  ): Promise<{ ok: boolean; pages?: string[]; error?: string }> => {
+    const res = await fetch(`${BASE}/export/typst/svg`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, template }),
+    });
+    if (res.ok) {
+      const data = await res.json() as { pages: string[] };
+      return { ok: true, pages: data.pages };
+    }
+    return { ok: false, error: await res.text() };
+  },
+  // Raw Typst source of an export template (for editing).
+  getTemplateSource: async (name: string): Promise<string> => {
+    const res = await fetch(`${BASE}/templates/${encodeURIComponent(name)}/source`);
+    if (!res.ok) throw new Error(`template source ${res.status}`);
+    return res.text();
+  },
+  // Save (create or overwrite) a template's Typst source via the multipart
+  // upload endpoint that backs template creation.
+  saveTemplate: async (name: string, source: string): Promise<void> => {
+    const form = new FormData();
+    form.append('name', name);
+    form.append('template', source);
+    const res = await fetch(`${BASE}/templates`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`save template ${res.status}`);
+  },
+  createNotebook: (
+    name?: string,
+    kernel?: { name: string; display_name: string; language?: string },
+  ) => post<{ name: string; path: string }>('/notebooks', {
+    name,
+    kernel_name: kernel?.name,
+    kernel_display_name: kernel?.display_name,
+    kernel_language: kernel?.language,
+  }),
   renameNotebook: (oldPath: string, newName: string) => post<{ path: string }>('/notebooks/rename', { old_path: oldPath, new_name: newName }),
   listFiles: (path?: string) => get<FileEntry[]>(path ? `/files/${path}` : '/files'),
   dataPreview: (path: string, opts: {

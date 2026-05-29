@@ -4,6 +4,7 @@ import { TabStrip } from '../toolbar/TabBar';
 import { useTabStore } from '../../stores/tabStore';
 import { Notebook } from '../notebook/Notebook';
 import { DataViewer } from '../data/DataViewer';
+import { TypstEditorView } from '../typst/TypstEditorView';
 import { SearchBar } from '../notebook/SearchBar';
 import { ShortcutHelp } from '../ShortcutHelp';
 import { ContextMenuHost } from '../ContextMenu';
@@ -28,6 +29,9 @@ function ActiveTabContent() {
 
   if (active?.kind === 'data') {
     return <DataViewer path={active.path} />;
+  }
+  if (active?.kind === 'typst') {
+    return <TypstEditorView key={active.path} path={active.path} />;
   }
   return (
     <div className="h-full overflow-y-auto">

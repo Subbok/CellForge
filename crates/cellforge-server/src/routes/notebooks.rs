@@ -61,6 +61,10 @@ pub async fn read(
 #[derive(serde::Deserialize)]
 pub struct CreateReq {
     pub name: Option<String>,
+    /// Kernel chosen at creation time. When absent, defaults to python3.
+    pub kernel_name: Option<String>,
+    pub kernel_display_name: Option<String>,
+    pub kernel_language: Option<String>,
 }
 
 pub async fn create(
@@ -90,7 +94,14 @@ pub async fn create(
     };
 
     let full = safe_resolve(&dir, &name)?;
-    let nb = Notebook::new_empty("python3", "Python 3", "python");
+    let nb = match req.kernel_name {
+        Some(kname) => {
+            let display = req.kernel_display_name.unwrap_or_else(|| kname.clone());
+            let language = req.kernel_language.unwrap_or_else(|| "python".to_string());
+            Notebook::new_empty(&kname, &display, &language)
+        }
+        None => Notebook::new_empty("python3", "Python 3", "python"),
+    };
     io::write_notebook(&full, &nb).map_err(|e| {
         tracing::error!("creating {name}: {e}");
         StatusCode::INTERNAL_SERVER_ERROR

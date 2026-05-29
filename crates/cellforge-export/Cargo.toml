@@ -20,3 +20,5 @@ comemo = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cellforge-config = { path = "../cellforge-config" }
 dirs = "6"
+typst-kit = { version = "0.14", default-features = false, features = ["downloads", "packages"] }
+typst-svg = "0.14"

@@ -57,6 +57,27 @@ pub async fn mkdir(
     Ok(StatusCode::OK)
 }
 
+/// Write a text file (create or overwrite). Used by the Typst document editor.
+#[derive(Deserialize)]
+pub struct WriteReq {
+    path: String,
+    content: String,
+}
+
+pub async fn write_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<WriteReq>,
+) -> Result<StatusCode, StatusCode> {
+    let dir = user_notebook_dir(&state, &headers);
+    let full = safe_resolve(&dir, &req.path)?;
+    if let Some(parent) = full.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&full, req.content).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::OK)
+}
+
 /// Delete file or folder.
 #[derive(Deserialize)]
 pub struct DeleteReq {
@@ -177,18 +198,54 @@ pub async fn rename_path(
     Ok(StatusCode::OK)
 }
 
+/// Move a file or folder to a new location (e.g. drag-and-drop into a folder).
+/// Unlike `rename_path` (same-directory only), `dest` is a full path relative
+/// to the user workspace, so this also moves across folders.
+#[derive(Deserialize)]
+pub struct MoveReq {
+    src: String,
+    dest: String,
+}
+
+pub async fn move_path(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<MoveReq>,
+) -> Result<StatusCode, StatusCode> {
+    let dir = user_notebook_dir(&state, &headers);
+    let src = safe_resolve(&dir, &req.src)?;
+    let dest = safe_resolve(&dir, &req.dest)?;
+
+    if dest.exists() {
+        return Err(StatusCode::CONFLICT);
+    }
+    if let Some(parent) = dest.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // fs::rename rejects moving a directory into its own subtree, which is the
+    // main invalid case — surface it as a 400 rather than a generic 500.
+    std::fs::rename(&src, &dest).map_err(|e| {
+        tracing::warn!("move {} -> {}: {e}", req.src, req.dest);
+        StatusCode::BAD_REQUEST
+    })?;
+    Ok(StatusCode::OK)
+}
+
 /// Download selected files as ZIP.
 #[derive(Deserialize)]
 pub struct ZipReq {
     paths: Vec<String>,
 }
 
-pub async fn download_zip(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(req): Json<ZipReq>,
-) -> Result<Response, StatusCode> {
-    let dir = user_notebook_dir(&state, &headers);
+/// Build a ZIP archive from `paths` (relative to `dir`). Files are added at
+/// their requested path; directories are walked recursively and every
+/// contained file is added at its path relative to `dir` (structure preserved).
+/// Returns the archive bytes and a suggested download filename.
+fn build_zip_archive(
+    dir: &std::path::Path,
+    paths: &[String],
+) -> Result<(Vec<u8>, String), StatusCode> {
+    let dir_canon = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
 
     let mut buf = Vec::new();
     {
@@ -197,27 +254,71 @@ pub async fn download_zip(
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
 
-        for path in &req.paths {
-            let full = safe_resolve(&dir, path)?;
+        for path in paths {
+            let full = safe_resolve(dir, path)?;
             if full.is_file() {
-                zip.start_file(path, options)
+                zip.start_file(path.clone(), options)
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                 let data = std::fs::read(&full).map_err(|_| StatusCode::NOT_FOUND)?;
                 zip.write_all(&data)
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            } else if full.is_dir() {
+                let mut files = Vec::new();
+                collect_files_recursive(&full, &mut files);
+                for file in files {
+                    let name = file
+                        .strip_prefix(&dir_canon)
+                        .ok()
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_else(|| {
+                            file.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string()
+                        });
+                    zip.start_file(name, options)
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    let data = std::fs::read(&file).map_err(|_| StatusCode::NOT_FOUND)?;
+                    zip.write_all(&data)
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                }
             }
         }
         zip.finish()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
+    // Single folder selected -> "<folder>.zip"; otherwise "files.zip".
+    let filename = if paths.len() == 1 {
+        let full = safe_resolve(dir, &paths[0])?;
+        if full.is_dir() {
+            full.file_name()
+                .map(|n| format!("{}.zip", n.to_string_lossy()))
+                .filter(|n| n != ".zip")
+                .unwrap_or_else(|| "files.zip".to_string())
+        } else {
+            "files.zip".to_string()
+        }
+    } else {
+        "files.zip".to_string()
+    };
+
+    Ok((buf, filename))
+}
+
+pub async fn download_zip(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<ZipReq>,
+) -> Result<Response, StatusCode> {
+    let dir = user_notebook_dir(&state, &headers);
+    let (buf, filename) = build_zip_archive(&dir, &req.paths)?;
+    let content_disposition = format!("attachment; filename=\"{filename}\"");
+
     Ok((
         [
-            (header::CONTENT_TYPE, "application/zip"),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=\"files.zip\"",
-            ),
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (header::CONTENT_DISPOSITION, content_disposition),
         ],
         buf,
     )
@@ -460,4 +561,48 @@ fn extract_zip(data: &[u8], dest: &std::path::Path) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn zip_includes_nested_folder_files() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        fs::create_dir_all(dir.join("myfolder/sub")).unwrap();
+        fs::write(dir.join("myfolder/a.txt"), b"hello").unwrap();
+        fs::write(dir.join("myfolder/sub/b.txt"), b"world").unwrap();
+
+        let (bytes, filename) =
+            build_zip_archive(dir, &["myfolder".to_string()]).unwrap();
+
+        assert!(!bytes.is_empty(), "archive should not be empty");
+        assert_eq!(filename, "myfolder.zip");
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.contains(&"myfolder/a.txt".to_string()), "names={names:?}");
+        assert!(names.contains(&"myfolder/sub/b.txt".to_string()), "names={names:?}");
+    }
+
+    #[test]
+    fn zip_name_is_files_for_multiple_selection() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path();
+        fs::write(dir.join("a.txt"), b"a").unwrap();
+        fs::write(dir.join("b.txt"), b"b").unwrap();
+
+        let (_, filename) = build_zip_archive(
+            dir,
+            &["a.txt".to_string(), "b.txt".to_string()],
+        )
+        .unwrap();
+        assert_eq!(filename, "files.zip");
+    }
 }

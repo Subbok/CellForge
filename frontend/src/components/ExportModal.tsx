@@ -6,8 +6,9 @@ import { cellToIpynb } from '../lib/serialize';
 import { useNotebookStore } from '../stores/notebookStore';
 import { useUIStore } from '../stores/uiStore';
 import { executeCommand } from '../plugins/registry';
-import { FileDown, Loader2 } from 'lucide-react';
+import { FileDown, Loader2, FileCode2 } from 'lucide-react';
 import { FFModalShell } from './modals/FFModalShell';
+import { TypstEditorModal } from './TypstEditorModal';
 
 type Format = string; // 'pdf' | 'html' | plugin-contributed formats
 
@@ -28,6 +29,7 @@ export function ExportModal({ onClose }: Props) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
   const [vars, setVars] = useState<Record<string, string>>({});
+  const [editingTemplate, setEditingTemplate] = useState(false);
   const pluginFormats = useUIStore(s => s.pluginExportFormats);
 
   useEffect(() => {
@@ -282,6 +284,17 @@ export function ExportModal({ onClose }: Props) {
         marginTop: 16, paddingTop: 14, gap: 8,
         borderTop: '1px solid var(--color-border-subtle)',
       }}>
+        {format === 'pdf' && (
+          <button onClick={() => setEditingTemplate(true)}
+            className="inline-flex items-center"
+            style={{
+              padding: '8px 14px', background: 'transparent',
+              border: '1px solid var(--color-border)', borderRadius: 6,
+              color: 'var(--color-text-secondary)', fontSize: 13, cursor: 'pointer', gap: 6,
+            }}>
+            <FileCode2 size={14} /> {t('export.editTemplate')}
+          </button>
+        )}
         <button onClick={onClose}
           style={{
             padding: '8px 14px', background: 'transparent',
@@ -306,6 +319,12 @@ export function ExportModal({ onClose }: Props) {
           {exporting ? t('export.exporting') : t('export.exportFormat', { format: format.toUpperCase() })}
         </button>
       </div>
+      {editingTemplate && (
+        <TypstEditorModal
+          templateName={selected}
+          onClose={() => setEditingTemplate(false)}
+        />
+      )}
     </FFModalShell>
   );
 }

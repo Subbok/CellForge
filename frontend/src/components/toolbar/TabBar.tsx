@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { FileText, X } from 'lucide-react';
+import { FileText, FileCode2, Sheet, X } from 'lucide-react';
 import { useTabStore } from '../../stores/tabStore';
 import { useNotebookStore } from '../../stores/notebookStore';
 import { removeTabSnapshot, switchToTab } from '../../services/tabManager';
@@ -114,7 +114,12 @@ export function TabStrip({ username }: { username: string }) {
                 : '1px solid transparent',
             }}
           >
-            <FileText size={12} className={isActive ? 'text-accent' : 'text-text-muted'} />
+            {(() => {
+              const cls = isActive ? 'text-accent' : 'text-text-muted';
+              if (tab.kind === 'data') return <Sheet size={12} className={cls} />;
+              if (tab.kind === 'typst') return <FileText size={12} className={cls} />;
+              return <FileCode2 size={12} className={cls} />;
+            })()}
             <span className="truncate" style={{ maxWidth: 180 }}>{tab.name}</span>
             {isDirty ? (
               <span

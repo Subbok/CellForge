@@ -5,7 +5,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use cellforge_data::{
     CsvReader, DataReader, JsonlReader, ParquetReader, PreviewResponse, SortDir, SortKey,
-    StatsResponse, stats,
+    StatsResponse, edit, stats,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -89,6 +89,56 @@ pub async fn column_stats(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
     Ok(Json(resp))
+}
+
+#[derive(Deserialize)]
+pub struct EditCellReq {
+    path: String,
+    row: usize,
+    col: usize,
+    value: String,
+}
+
+/// `POST /api/data/cell` — update a single cell of a CSV/TSV or JSON/JSONL file.
+/// Addressed by file row index (header excluded). The frontend only allows this
+/// in the unsorted, unfiltered view so the index matches the file. Parquet is
+/// read-only.
+pub async fn edit_cell(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<EditCellReq>,
+) -> Result<StatusCode, StatusCode> {
+    if crate::routes::auth::extract_user(&headers).is_none() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let dir = user_notebook_dir(&state, &headers);
+    let full = safe_resolve(&dir, &req.path)?;
+
+    let ext = full
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+
+    match ext.as_deref() {
+        Some("csv") | Some("tsv") | Some("txt") => {
+            edit::set_csv_cell(&full, req.row, req.col, &req.value).map_err(|e| {
+                tracing::warn!("edit csv {}: {e}", req.path);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        }
+        Some("jsonl") | Some("ndjson") | Some("json") => {
+            // Need the column's name + type to set/coerce the JSON field.
+            let reader = open_reader(&full, &req.path)?;
+            let schema = reader.schema();
+            let col = schema.get(req.col).ok_or(StatusCode::BAD_REQUEST)?;
+            edit::set_json_cell(&full, &col.name, col.ty, req.row, &req.value).map_err(|e| {
+                tracing::warn!("edit json {}: {e}", req.path);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        }
+        _ => return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE),
+    }
+    Ok(StatusCode::OK)
 }
 
 fn open_reader(full: &std::path::Path, label: &str) -> Result<Box<dyn DataReader>, StatusCode> {

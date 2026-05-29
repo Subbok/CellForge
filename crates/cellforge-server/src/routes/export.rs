@@ -181,3 +181,70 @@ pub async fn delete_template(
     templates::delete_template(&name).map_err(|_| StatusCode::NOT_FOUND)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Return the raw Typst source of a template, for editing in the in-app editor.
+pub async fn template_source(
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> Result<String, StatusCode> {
+    templates::read_template(&name).map_err(|_| StatusCode::NOT_FOUND)
+}
+
+#[derive(Deserialize)]
+pub struct TypstCompileReq {
+    source: String,
+    /// Optional template whose assets (images, fonts) should be available
+    /// during compilation. Used by the template editor's preview.
+    template: Option<String>,
+}
+
+/// Compile arbitrary Typst source to PDF for the in-app editor preview.
+/// Returns the PDF bytes on success, or 422 with the Typst error text on
+/// failure (so the editor can show it inline).
+pub async fn compile_typst(Json(req): Json<TypstCompileReq>) -> Result<Response, StatusCode> {
+    let assets = req
+        .template
+        .as_deref()
+        .map(templates::template_assets)
+        .unwrap_or_default();
+    let images: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let source = req.source;
+
+    let result = tokio::task::spawn_blocking(move || {
+        compile::compile_to_pdf(&source, &images, &assets)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match result {
+        Ok(pdf) => Ok(([(header::CONTENT_TYPE, "application/pdf")], pdf).into_response()),
+        Err(e) => Ok((StatusCode::UNPROCESSABLE_ENTITY, format!("{e}")).into_response()),
+    }
+}
+
+#[derive(Serialize)]
+pub struct TypstSvgResponse {
+    pages: Vec<String>,
+}
+
+/// Compile Typst source to one SVG string per page, for the editor's crisp,
+/// chrome-free preview. 422 + error text on failure.
+pub async fn compile_typst_svg(Json(req): Json<TypstCompileReq>) -> Result<Response, StatusCode> {
+    let assets = req
+        .template
+        .as_deref()
+        .map(templates::template_assets)
+        .unwrap_or_default();
+    let images: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let source = req.source;
+
+    let result = tokio::task::spawn_blocking(move || {
+        compile::compile_to_svg(&source, &images, &assets)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match result {
+        Ok(pages) => Ok(Json(TypstSvgResponse { pages }).into_response()),
+        Err(e) => Ok((StatusCode::UNPROCESSABLE_ENTITY, format!("{e}")).into_response()),
+    }
+}

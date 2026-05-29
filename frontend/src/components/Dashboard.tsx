@@ -3,22 +3,26 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { api, type FileEntry } from '../services/api';
 import type { Notebook } from '../lib/types';
+import { useKernelStore } from '../stores/kernelStore';
 import {
   Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Plus, Upload,
-  Pencil, Trash2, Share2, Archive, FolderPlus, Download, Search, MoreVertical,
+  Pencil, Trash2, Share2, Archive, FolderPlus, Download, Search, MoreVertical, FileCode2, Sheet,
 } from 'lucide-react';
 import { ShareModal } from './ShareModal';
+import { KernelPicker } from './KernelPicker';
 import { FFModalShell, FFInput } from './modals/FFModalShell';
 
 interface Props {
-  onOpenNotebook: (path: string, notebook: Notebook) => void;
+  onOpenNotebook: (path: string, notebook: Notebook, kernelName?: string) => void;
   /** Called when the user clicks a tabular data file (CSV/TSV/etc.).
    *  Unlike notebook-open this skips the kernel-picker stage — data
    *  preview is read-only and doesn't need a kernel attached. */
   onOpenDataFile?: (path: string) => void;
+  /** Open a .typ document in the editor shell (as a tab). */
+  onOpenTypstFile?: (path: string) => void;
 }
 
-export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
+export function Dashboard({ onOpenNotebook, onOpenDataFile, onOpenTypstFile }: Props) {
   const { t } = useTranslation();
   const [cwd, setCwd] = useState('');
   const [_rootDir, setRootDir] = useState('');
@@ -30,8 +34,11 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
   const [shareTarget, setShareTarget] = useState<string | null>(null);
-  const [createModal, setCreateModal] = useState<'notebook' | 'folder' | null>(null);
+  const [createModal, setCreateModal] = useState<'notebook' | 'folder' | 'typst' | null>(null);
   const [createName, setCreateName] = useState('');
+  // When set, the user has named a new notebook and is choosing its kernel
+  // before the file is actually created. Holds the resolved notebook path.
+  const [pendingNbPath, setPendingNbPath] = useState<string | null>(null);
   const [shareUsers, setShareUsers] = useState<{ username: string; display_name: string }[]>([]);
   const [sharedFiles, setSharedFiles] = useState<{ from_user: string; file_name: string }[]>([]);
   const [outboundShares, setOutboundShares] = useState<{ id: number; to_user: string }[]>([]);
@@ -118,6 +125,22 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
     loadFiles();
   }
 
+  // Move an existing workspace file/folder into `folderPath` (drag-and-drop).
+  async function moveIntoFolder(srcPath: string, folderPath: string) {
+    if (srcPath === folderPath) return; // dropped onto itself
+    const base = srcPath.split('/').pop() ?? srcPath;
+    const srcParent = srcPath.includes('/') ? srcPath.slice(0, srcPath.lastIndexOf('/')) : '';
+    if (srcParent === folderPath) return; // already in this folder — no-op
+    const dest = folderPath ? `${folderPath}/${base}` : base;
+    try {
+      await api.moveFile(srcPath, dest);
+      loadFiles();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg.includes('409') ? 'A file with that name already exists there' : 'Could not move file');
+    }
+  }
+
   function toggleSelect(path: string) {
     setSelected(prev => {
       const next = new Set(prev);
@@ -128,11 +151,11 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
   }
 
   async function downloadSelected() {
-    const blob = await api.downloadZip([...selected]);
+    const { blob, filename } = await api.downloadZip([...selected]);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'files.zip';
+    a.download = filename;
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
@@ -148,20 +171,56 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
   async function doCreate() {
     const name = createName.trim();
     if (!name) return;
-    try {
-      if (createModal === 'folder') {
+    if (createModal === 'folder') {
+      try {
         await api.createFolder(cwd ? `${cwd}/${name}` : name);
-      } else {
-        const nbName = name.endsWith('.ipynb') ? name : `${name}.ipynb`;
-        await api.createNotebook(cwd ? `${cwd}/${nbName}` : nbName);
+        loadFiles();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setError(msg);
       }
-      loadFiles();
+      setCreateModal(null);
+      return;
+    }
+    if (createModal === 'typst') {
+      const typName = name.endsWith('.typ') ? name : `${name}.typ`;
+      const path = cwd ? `${cwd}/${typName}` : typName;
+      setCreateModal(null);
+      try {
+        await api.writeFile(path, '');
+        loadFiles();
+        onOpenTypstFile?.(path);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+    // Notebook: defer actual creation until a kernel is chosen.
+    const nbName = name.endsWith('.ipynb') ? name : `${name}.ipynb`;
+    const path = cwd ? `${cwd}/${nbName}` : nbName;
+    setCreateModal(null);
+    setPendingNbPath(path);
+  }
+
+  async function createNotebookWithKernel(kernelName: string) {
+    const path = pendingNbPath;
+    setPendingNbPath(null);
+    if (!path) return;
+    try {
+      const spec = useKernelStore.getState().availableSpecs.find(s => s.name === kernelName);
+      const res = await api.createNotebook(path, {
+        name: kernelName,
+        display_name: spec?.display_name ?? kernelName,
+        language: spec?.language,
+      });
+      const nb = await api.getNotebook(res.path);
+      onOpenNotebook(res.path, nb, kernelName);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('409')) setError('A notebook with this name already exists');
       else setError(msg);
+      loadFiles();
     }
-    setCreateModal(null);
   }
 
   return (
@@ -296,6 +355,10 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
                   className="w-full text-left px-3 py-2 text-[13px] text-text hover:bg-bg-hover flex items-center gap-2">
                   <FolderPlus size={13} /> {t('dashboard.folder')}
                 </button>
+                <button onClick={() => { setCreateModal('typst'); setCreateName('untitled.typ'); setShowNewMenu(false); }}
+                  className="w-full text-left px-3 py-2 text-[13px] text-text hover:bg-bg-hover flex items-center gap-2">
+                  <FileCode2 size={13} /> {t('dashboard.typstDocument')}
+                </button>
               </div>
             )}
           </div>
@@ -386,6 +449,7 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
                   onOpen={() => {
                     if (f.is_dir) navigateInto(f.path);
                     else if (f.name.endsWith('.ipynb')) openNotebook(f.path);
+                    else if (f.name.endsWith('.typ')) onOpenTypstFile?.(f.path);
                     else if (/\.(csv|tsv|json|jsonl|ndjson|parquet|pq)$/i.test(f.name)) onOpenDataFile?.(f.path);
                   }}
                   onShare={() => openShareModal(f.path)}
@@ -395,6 +459,7 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
                     catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
                   } : undefined}
                   onDropFiles={f.is_dir ? (files => dropOntoFolder(files, f.path)) : undefined}
+                  onMoveHere={f.is_dir ? (src => moveIntoFolder(src, f.path)) : undefined}
                   onRename={async (newName) => {
                     try { await api.renameFile(f.path, newName); loadFiles(); }
                     catch (e: unknown) { setError(e instanceof Error ? e.message : String(e)); }
@@ -410,32 +475,45 @@ export function Dashboard({ onOpenNotebook, onOpenDataFile }: Props) {
       {/* Create notebook / folder modal */}
       {createModal && (
         <FFModalShell
-          title={createModal === 'notebook' ? 'New notebook' : 'New folder'}
+          title={createModal === 'notebook' ? 'New notebook' : createModal === 'typst' ? 'New Typst document' : 'New folder'}
           subtitle={
             createModal === 'notebook'
               ? 'Create a reactive notebook in the current directory.'
-              : `Create a new folder in ${cwd ? '~/' + cwd : 'workspace root'}.`
+              : createModal === 'typst'
+                ? 'Create a Typst document in the current directory.'
+                : `Create a new folder in ${cwd ? '~/' + cwd : 'workspace root'}.`
           }
           width={480}
-          primaryLabel={createModal === 'notebook' ? 'Create notebook' : 'Create folder'}
+          primaryLabel={createModal === 'notebook' ? 'Create notebook' : createModal === 'typst' ? 'Create document' : 'Create folder'}
           primaryDisabled={!createName.trim()}
           onClose={() => setCreateModal(null)}
           onPrimary={doCreate}
         >
           <FFInput
-            label={createModal === 'notebook' ? 'Notebook name' : 'Folder name'}
+            label={createModal === 'notebook' ? 'Notebook name' : createModal === 'typst' ? 'Document name' : 'Folder name'}
             value={createName}
             onChange={setCreateName}
-            placeholder={createModal === 'notebook' ? 'protein-folding-v4' : 'experiments'}
+            placeholder={createModal === 'notebook' ? 'protein-folding-v4' : createModal === 'typst' ? 'report' : 'experiments'}
             mono
             autoFocus
             onEnter={() => { if (createName.trim()) void doCreate(); }}
             hint={createModal === 'notebook'
               ? `Will be saved as ${createName.trim().endsWith('.ipynb') ? createName.trim() : `${createName.trim() || 'untitled'}.ipynb`}`
-              : undefined}
+              : createModal === 'typst'
+                ? `Will be saved as ${createName.trim().endsWith('.typ') ? createName.trim() : `${createName.trim() || 'untitled'}.typ`}`
+                : undefined}
           />
         </FFModalShell>
       )}
+
+      {/* Kernel picker shown while creating a new notebook */}
+      {pendingNbPath && (
+        <KernelPicker
+          onSelect={(kernelName) => { void createNotebookWithKernel(kernelName); }}
+          onCancel={() => setPendingNbPath(null)}
+        />
+      )}
+
 
       {/* Share modal */}
       {shareTarget && (
@@ -522,7 +600,7 @@ function formatRelative(iso: string): string {
   return new Date(normalized).toLocaleDateString();
 }
 
-function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownload, selected, onSelect, sharedBy, onDropFiles }: {
+function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownload, selected, onSelect, sharedBy, onDropFiles, onMoveHere }: {
   file: FileEntry;
   onOpen: () => void;
   onRename?: (newName: string) => void;
@@ -536,6 +614,9 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
   /** Active only when the row represents a folder; called with the dropped
    *  File list so the parent can route the upload into THIS folder. */
   onDropFiles?: (files: File[]) => void | Promise<void>;
+  /** Active only on folders; called with the dragged workspace path when an
+   *  existing file/folder is dropped onto this folder (move). */
+  onMoveHere?: (srcPath: string) => void;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -546,9 +627,11 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const isNotebook = file.name.endsWith('.ipynb');
+  const isTypst = file.name.endsWith('.typ');
   const isData = /\.(csv|tsv|json|jsonl|ndjson|parquet|pq)$/i.test(file.name);
-  const clickable = file.is_dir || isNotebook || isData;
-  const isFolderDropTarget = file.is_dir && !!onDropFiles;
+  const clickable = file.is_dir || isNotebook || isData || isTypst;
+  const isFolderDropTarget = file.is_dir && (!!onDropFiles || !!onMoveHere);
+  const CF_PATH = 'application/x-cellforge-path';
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -599,11 +682,19 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
         borderTop: '1px solid var(--color-border-subtle)',
       }}
       onClick={() => clickable && !editing && onOpen()}
+      draggable={!editing}
+      onDragStart={e => {
+        if (editing) return;
+        // Mark this as an internal workspace-path drag (distinct from an OS
+        // file drag, which exposes the 'Files' type instead).
+        e.dataTransfer.setData(CF_PATH, file.path);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
       onDragOver={isFolderDropTarget ? (e => {
-        // Only opt-in to the drop when files are being dragged; stop the
-        // event from bubbling to the dashboard-level drop zone so we don't
-        // double-upload (folder + cwd) on the same drop.
-        if (!e.dataTransfer.types.includes('Files')) return;
+        // Accept OS-file drags (upload) and internal path drags (move). Stop
+        // bubbling to the dashboard-level drop zone so we don't double-handle.
+        const types = e.dataTransfer.types;
+        if (!types.includes('Files') && !types.includes(CF_PATH)) return;
         e.preventDefault();
         e.stopPropagation();
         setDragOver(true);
@@ -613,8 +704,10 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
         e.preventDefault();
         e.stopPropagation();
         setDragOver(false);
+        const internal = e.dataTransfer.getData(CF_PATH);
+        if (internal) { onMoveHere?.(internal); return; }
         const files = Array.from(e.dataTransfer.files);
-        if (files.length) onDropFiles!(files);
+        if (files.length) onDropFiles?.(files);
       }) : undefined}
     >
       {/* Checkbox */}
@@ -629,7 +722,11 @@ function FileRow({ file, onOpen, onRename, onDelete, onShare, onExtract, onDownl
         {file.is_dir ? (
           <Folder size={16} className="text-accent shrink-0" />
         ) : isNotebook ? (
+          <FileCode2 size={16} className="text-accent shrink-0" />
+        ) : isTypst ? (
           <FileText size={16} className="text-accent shrink-0" />
+        ) : isData ? (
+          <Sheet size={16} className="text-accent shrink-0" />
         ) : (
           <FileText size={16} className="text-text-secondary shrink-0" />
         )}

@@ -4,7 +4,8 @@ import { setLanguage } from '../lib/i18n';
 import { api } from '../services/api';
 import { useUIStore } from '../stores/uiStore';
 import { refreshPlugins } from '../plugins/loader';
-import { Trash2, Upload, Check, Puzzle, Shield, RotateCcw, Key } from 'lucide-react';
+import { Trash2, Upload, Check, Puzzle, Shield, RotateCcw, Key, Pencil, FileCode2 } from 'lucide-react';
+import { TypstEditorModal } from './TypstEditorModal';
 import { useModal } from './ModalDialog';
 import type { PluginEntry, PluginScope } from '../plugins/types';
 import { BrandMark } from './brand/BrandMark';
@@ -497,6 +498,8 @@ function TemplatesPane() {
   const [uploadAssets, setUploadAssets] = useState<File[]>([]);
   const typInputRef = useRef<HTMLInputElement>(null);
   const assetInputRef = useRef<HTMLInputElement>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorTemplate, setEditorTemplate] = useState<string | undefined>(undefined);
 
   function loadTemplates() {
     api.listTemplates().then(setTemplates).catch(() => {});
@@ -542,6 +545,13 @@ function TemplatesPane() {
                 </span>
               )}
             </div>
+            {tpl.name !== 'blank' && (
+              <button onClick={() => { setEditorTemplate(tpl.name); setEditorOpen(true); }}
+                className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text"
+                title={t('settings.editTemplate')}>
+                <Pencil size={14} />
+              </button>
+            )}
             <label className="btn btn-sm btn-ghost cursor-pointer" title={t('settings.addAssets')}>
               <Upload size={12} />
               <input type="file" multiple className="hidden" onChange={async e => {
@@ -563,9 +573,14 @@ function TemplatesPane() {
       </div>
 
       {!showUpload ? (
-        <button onClick={() => setShowUpload(true)} className="btn btn-md btn-secondary mt-3">
-          <Upload size={14} /> {t('settings.uploadTemplate')}
-        </button>
+        <div className="flex gap-2 mt-3">
+          <button onClick={() => { setEditorTemplate(undefined); setEditorOpen(true); }} className="btn btn-md btn-primary">
+            <FileCode2 size={14} /> {t('settings.newTemplate')}
+          </button>
+          <button onClick={() => setShowUpload(true)} className="btn btn-md btn-secondary">
+            <Upload size={14} /> {t('settings.uploadTemplate')}
+          </button>
+        </div>
       ) : (
         <div className="mt-3 space-y-3" style={{
           padding: 16, borderRadius: 8,
@@ -603,6 +618,13 @@ function TemplatesPane() {
             </button>
           </div>
         </div>
+      )}
+
+      {editorOpen && (
+        <TypstEditorModal
+          templateName={editorTemplate}
+          onClose={() => { setEditorOpen(false); loadTemplates(); }}
+        />
       )}
     </>
   );

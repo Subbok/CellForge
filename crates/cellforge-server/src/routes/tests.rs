@@ -1,5 +1,5 @@
 use crate::plugins::PluginSettings;
-use crate::routes::{fileops, files, kernels, notebooks, safe_resolve};
+use crate::routes::{export, fileops, files, kernels, notebooks, safe_resolve};
 use crate::state::AppState;
 use crate::ws::collab::CollabState;
 
@@ -325,6 +325,60 @@ async fn notebook_create_conflict() {
     assert_eq!(resp.status(), 409);
 }
 
+// -- create with an explicit kernel persists it into metadata.kernelspec --
+#[tokio::test]
+async fn notebook_create_with_kernel_persists_kernelspec() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path();
+    let state = test_state(base);
+
+    let app = Router::new()
+        .route("/api/notebooks", post(notebooks::create))
+        .with_state(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/notebooks")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"name":"r.ipynb","kernel_name":"ir","kernel_display_name":"R","kernel_language":"r"}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let content = std::fs::read_to_string(base.join("r.ipynb")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(v["metadata"]["kernelspec"]["name"], "ir");
+    assert_eq!(v["metadata"]["kernelspec"]["display_name"], "R");
+    assert_eq!(v["metadata"]["kernelspec"]["language"], "r");
+}
+
+// -- create without a kernel keeps the python3 default --
+#[tokio::test]
+async fn notebook_create_without_kernel_defaults_python3() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path();
+    let state = test_state(base);
+
+    let app = Router::new()
+        .route("/api/notebooks", post(notebooks::create))
+        .with_state(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/notebooks")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name":"p.ipynb"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let content = std::fs::read_to_string(base.join("p.ipynb")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(v["metadata"]["kernelspec"]["name"], "python3");
+}
+
 // ---------------------------------------------------------------------------
 // 5. Kernel listing
 // ---------------------------------------------------------------------------
@@ -350,6 +404,106 @@ async fn kernel_listing_returns_json_array() {
     let bytes = body_bytes(resp.into_body()).await;
     let specs: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(specs.is_array(), "kernelspecs should return a JSON array");
+}
+
+// ---------------------------------------------------------------------------
+// 6. Typst editor compile endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn typst_compile_valid_source_returns_pdf() {
+    let app = Router::new().route("/api/export/typst", post(export::compile_typst));
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/export/typst")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"source":"= Hello\n\nWorld"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let bytes = body_bytes(resp.into_body()).await;
+    assert!(!bytes.is_empty(), "should return PDF bytes");
+    assert!(bytes.starts_with(b"%PDF"), "should look like a PDF");
+}
+
+#[tokio::test]
+async fn typst_compile_broken_source_returns_422() {
+    let app = Router::new().route("/api/export/typst", post(export::compile_typst));
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/export/typst")
+        .header("content-type", "application/json")
+        // references an undefined variable -> compile error
+        .body(Body::from(r##"{"source":"#this_is_not_defined"}"##))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 422);
+
+    let bytes = body_bytes(resp.into_body()).await;
+    assert!(!bytes.is_empty(), "should return an error message body");
+}
+
+#[tokio::test]
+async fn write_file_persists_content() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path();
+    let state = test_state(base);
+
+    let app = Router::new()
+        .route("/api/files/write", post(fileops::write_file))
+        .with_state(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/files/write")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"path":"notes.typ","content":"= Hello"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let content = std::fs::read_to_string(base.join("notes.typ")).unwrap();
+    assert_eq!(content, "= Hello");
+}
+
+#[tokio::test]
+async fn move_path_moves_across_folders() {
+    let tmp = TempDir::new().unwrap();
+    let base = tmp.path();
+    std::fs::create_dir(base.join("dst")).unwrap();
+    std::fs::write(base.join("a.txt"), "hi").unwrap();
+    let state = test_state(base);
+
+    let app = Router::new()
+        .route("/api/files/move", post(fileops::move_path))
+        .with_state(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/files/move")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"src":"a.txt","dest":"dst/a.txt"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+    assert!(!base.join("a.txt").exists(), "source should be gone");
+    assert!(base.join("dst/a.txt").exists(), "dest should exist");
+}
+
+#[tokio::test]
+async fn template_source_missing_returns_404() {
+    let app = Router::new()
+        .route("/api/templates/{name}/source", get(export::template_source));
+
+    let req = Request::builder()
+        .uri("/api/templates/definitely-not-a-real-template-xyz/source")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 404);
 }
 
 // ---------------------------------------------------------------------------

@@ -10,20 +10,29 @@ use typst::syntax::{FileId, Source, VirtualPath};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, World};
+use typst_kit::download::{Downloader, ProgressSink};
+use typst_kit::package::PackageStorage;
 
 /// Compile typst source to PDF bytes.
 /// `images` — notebook images (name → base64/svg), `assets` — template files (name → raw bytes)
+fn compile_document(
+    typ_source: &str,
+    images: &HashMap<String, String>,
+    assets: &HashMap<String, Vec<u8>>,
+) -> Result<typst::layout::PagedDocument> {
+    let world = CellForgeWorld::new(typ_source, images, assets)?;
+    typst::compile(&world).output.map_err(|errs| {
+        let msgs: Vec<String> = errs.iter().map(|e| format!("{:?}", e.message)).collect();
+        anyhow::anyhow!("typst compile errors:\n{}", msgs.join("\n"))
+    })
+}
+
 pub fn compile_to_pdf(
     typ_source: &str,
     images: &HashMap<String, String>,
     assets: &HashMap<String, Vec<u8>>,
 ) -> Result<Vec<u8>> {
-    let world = CellForgeWorld::new(typ_source, images, assets)?;
-
-    let document = typst::compile(&world).output.map_err(|errs| {
-        let msgs: Vec<String> = errs.iter().map(|e| format!("{:?}", e.message)).collect();
-        anyhow::anyhow!("typst compile errors:\n{}", msgs.join("\n"))
-    })?;
+    let document = compile_document(typ_source, images, assets)?;
 
     let pdf = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|errs| {
         let msgs: Vec<String> = errs.iter().map(|e| format!("{e:?}")).collect();
@@ -33,12 +42,26 @@ pub fn compile_to_pdf(
     Ok(pdf)
 }
 
+/// Compile to one SVG string per page — used for the in-app editor preview so
+/// we render crisp vector pages with no browser PDF chrome.
+pub fn compile_to_svg(
+    typ_source: &str,
+    images: &HashMap<String, String>,
+    assets: &HashMap<String, Vec<u8>>,
+) -> Result<Vec<String>> {
+    let document = compile_document(typ_source, images, assets)?;
+    Ok(document.pages.iter().map(typst_svg::svg).collect())
+}
+
 struct CellForgeWorld {
     library: LazyHash<Library>,
     book: LazyHash<FontBook>,
     fonts: Vec<Font>,
     main: Source,
     files: HashMap<String, Bytes>,
+    /// Downloads + caches `@preview` packages on demand (standard typst cache
+    /// dir). Lets `#import "@preview/…"` work without a terminal.
+    packages: PackageStorage,
 }
 
 impl CellForgeWorld {
@@ -72,13 +95,32 @@ impl CellForgeWorld {
             files.insert(name.clone(), Bytes::new(data.clone()));
         }
 
+        // Default paths → the standard typst package cache (~/.cache/typst).
+        let packages = PackageStorage::new(None, None, Downloader::new("cellforge"));
+
         Ok(Self {
             library: LazyHash::new(Library::default()),
             book: LazyHash::new(book),
             fonts,
             main,
             files,
+            packages,
         })
+    }
+
+    /// Resolve a file that belongs to a `@preview`/`@local` package, downloading
+    /// and caching the package on first use.
+    fn read_package_file(&self, id: FileId) -> FileResult<Bytes> {
+        let spec = id
+            .package()
+            .ok_or_else(|| FileError::NotFound(id.vpath().as_rootless_path().into()))?;
+        let dir = self
+            .packages
+            .prepare_package(spec, &mut ProgressSink)
+            .map_err(FileError::Package)?;
+        let path = dir.join(id.vpath().as_rootless_path());
+        let data = std::fs::read(&path).map_err(|e| FileError::from_io(e, &path))?;
+        Ok(Bytes::new(data))
     }
 }
 
@@ -97,13 +139,24 @@ impl World for CellForgeWorld {
 
     fn source(&self, id: FileId) -> FileResult<Source> {
         if id == self.main.id() {
-            Ok(self.main.clone())
-        } else {
-            Err(FileError::NotFound(id.vpath().as_rootless_path().into()))
+            return Ok(self.main.clone());
         }
+        // .typ files inside an imported package.
+        if id.package().is_some() {
+            let bytes = self.read_package_file(id)?;
+            let text = std::str::from_utf8(&bytes)
+                .map_err(|_| FileError::InvalidUtf8)?
+                .to_string();
+            return Ok(Source::new(id, text));
+        }
+        Err(FileError::NotFound(id.vpath().as_rootless_path().into()))
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
+        // Assets/data shipped inside an imported package.
+        if id.package().is_some() {
+            return self.read_package_file(id);
+        }
         let path = id.vpath().as_rootless_path().to_string_lossy().to_string();
         self.files
             .get(&path)
@@ -254,11 +307,32 @@ print("hello")
     }
 
     #[test]
+    fn compile_to_svg_returns_pages() {
+        let pages = compile_to_svg("= Hello\n\nWorld", &HashMap::new(), &HashMap::new()).unwrap();
+        assert!(!pages.is_empty(), "expected at least one page");
+        assert!(pages[0].contains("<svg"), "expected SVG markup");
+    }
+
+    #[test]
     fn compile_invalid_typst_returns_error() {
         let source = r#"#set page(paper: "nonexistent_size_xyz")"#;
         let result = compile_to_pdf(source, &HashMap::new(), &HashMap::new());
         // this should produce a compile error, not panic
         assert!(result.is_err(), "invalid typst should fail gracefully");
+    }
+
+    // Network test: downloads a real @preview package and compiles a document
+    // that imports it. Ignored by default so offline/CI runs don't break; run
+    // with `cargo test -p cellforge-export -- --ignored`.
+    #[test]
+    #[ignore = "requires network access to packages.typst.org"]
+    fn compile_imports_preview_package() {
+        let source = r#"#import "@preview/cetz:0.3.4"
+= ok
+"#;
+        let pdf = compile_to_pdf(source, &HashMap::new(), &HashMap::new())
+            .expect("importing a @preview package should compile");
+        assert!(pdf.starts_with(b"%PDF"), "expected PDF output");
     }
 
     #[test]

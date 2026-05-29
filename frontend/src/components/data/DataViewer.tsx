@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronUp, ChevronDown, ChevronsUpDown, Loader, EyeOff, BarChart3, X } from 'lucide-react';
 import {
   api,
@@ -57,6 +57,11 @@ export function DataViewer({ path }: { path: string }) {
   const [data, setData] = useState<DataPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Inline cell editing (CSV/TSV/JSONL only, unsorted+unfiltered view).
+  const [editing, setEditing] = useState<{ ri: number; ci: number } | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const cancelEdit = useRef(false);
 
   // Per-column free-text filter applied client-side over the active page.
   const [filters, setFilters] = useState<Record<number, string>>({});
@@ -95,7 +100,7 @@ export function DataViewer({ path }: { path: string }) {
     return () => {
       cancelled = true;
     };
-  }, [path, offset, sort]);
+  }, [path, offset, sort, reloadKey]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -149,6 +154,34 @@ export function DataViewer({ path }: { path: string }) {
       .map((row, ri) => ({ row, ri }))
       .filter(({ row }) => rowMatches(row, filters));
   }, [data, filters]);
+
+  // Editing is only safe when the displayed row index maps 1:1 to the file
+  // row — i.e. no sort and no active filter. Parquet is read-only.
+  const isParquet = /\.(parquet|pq)$/i.test(path);
+  const filtersActive = Object.values(filters).some(v => !!v);
+  const editable = !isParquet && sort === null && !filtersActive;
+
+  async function commitEdit() {
+    const cell = editing;
+    setEditing(null);
+    if (!cell || !data) return;
+    const { ri, ci } = cell;
+    const newVal = editValue;
+    const absRow = data.offset + ri;
+    // optimistic local update
+    setData(d => {
+      if (!d) return d;
+      const rows = d.rows.map(r => r.slice());
+      rows[ri][ci] = newVal;
+      return { ...d, rows };
+    });
+    try {
+      await api.editDataCell(path, absRow, ci, newVal);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setReloadKey(k => k + 1); // resync from disk on failure
+    }
+  }
 
   return (
     <div className="flex flex-col h-full min-h-0" style={{ background: 'var(--color-bg)' }}>
@@ -296,9 +329,13 @@ export function DataViewer({ path }: { path: string }) {
                     </td>
                     {visibleColumns.map(({ col, i: ci }) => {
                       const cell = formatCell(row[ci]);
+                      const isEditingCell = editing?.ri === ri && editing?.ci === ci;
                       return (
                         <td
                           key={ci}
+                          onDoubleClick={editable && !isEditingCell
+                            ? () => { setEditing({ ri, ci }); setEditValue(cell.isNull ? '' : cell.text); }
+                            : undefined}
                           style={{
                             textAlign: alignFor(col.type),
                             padding: '4px 8px',
@@ -309,10 +346,31 @@ export function DataViewer({ path }: { path: string }) {
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
+                            cursor: editable ? 'cell' : 'default',
                           }}
-                          title={cell.text}
+                          title={editable ? `${cell.text} — double-click to edit` : cell.text}
                         >
-                          {cell.text}
+                          {isEditingCell ? (
+                            <input
+                              autoFocus
+                              value={editValue}
+                              onChange={e => setEditValue(e.target.value)}
+                              onBlur={() => {
+                                if (cancelEdit.current) { cancelEdit.current = false; setEditing(null); return; }
+                                void commitEdit();
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+                                else if (e.key === 'Escape') { cancelEdit.current = true; e.currentTarget.blur(); }
+                              }}
+                              style={{
+                                width: '100%', boxSizing: 'border-box',
+                                background: 'var(--color-bg-elevated)', color: 'var(--color-text)',
+                                border: '1px solid var(--color-accent)', borderRadius: 4,
+                                padding: '2px 4px', font: 'inherit', textAlign: alignFor(col.type),
+                              }}
+                            />
+                          ) : cell.text}
                         </td>
                       );
                     })}

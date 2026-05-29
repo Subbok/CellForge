@@ -11,6 +11,7 @@
 //! and Parquet readers ship in-tree.
 
 pub mod csv;
+pub mod edit;
 pub mod jsonl;
 pub mod parquet;
 pub mod schema;

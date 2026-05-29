@@ -271,6 +271,20 @@ function App() {
       const nbPath = notebookPathFromUrl();
       const savedKernel = kernelFromUrl();
       if (nbPath) {
+        // Non-notebook documents (Typst, data previews) are restored as their
+        // own tab kind — they're not notebooks, so getNotebook would 404.
+        const name = nbPath.split('/').pop() ?? nbPath;
+        const lower = nbPath.toLowerCase();
+        if (lower.endsWith('.typ')) {
+          useTabStore.getState().addTypstTab(nbPath, name);
+          setStageRaw('ready');
+          return;
+        }
+        if (/\.(csv|tsv|json|jsonl|ndjson|parquet|pq)$/.test(lower)) {
+          useTabStore.getState().addDataTab(nbPath, name);
+          setStageRaw('ready');
+          return;
+        }
         api.getNotebook(nbPath).then(nb => {
           if (savedKernel) {
             ws.connect(savedKernel, nbPath);
@@ -279,6 +293,15 @@ function App() {
             const name = nbPath.split('/').pop() ?? 'Untitled';
             useTabStore.getState().addTab(nbPath, name, savedKernel);
             // always start collab so multiple users can edit together
+            initCollaboration(nbPath, username ?? 'anonymous');
+            setStageRaw('ready');
+          } else if (nb.metadata.kernelspec?.name) {
+            const k = nb.metadata.kernelspec.name;
+            ws.connect(k, nbPath);
+            useKernelStore.getState().setSpec(k);
+            useNotebookStore.getState().loadNotebook(nbPath, nb);
+            const name = nbPath.split('/').pop() ?? 'Untitled';
+            useTabStore.getState().addTab(nbPath, name, k);
             initCollaboration(nbPath, username ?? 'anonymous');
             setStageRaw('ready');
           } else {
@@ -381,6 +404,26 @@ function App() {
     }
   }, []);
 
+  // Open a notebook. If a kernel is supplied (creation flow) or the notebook
+  // already records one in its metadata, connect directly; otherwise fall back
+  // to the kernel picker.
+  function openNotebook(path: string, nb: Notebook, kernelName?: string) {
+    const resolved = kernelName ?? nb.metadata.kernelspec?.name;
+    if (resolved) {
+      saveCurrentTab();
+      ws.connect(resolved, path);
+      useKernelStore.getState().setSpec(resolved);
+      useNotebookStore.getState().loadNotebook(path, nb);
+      const name = path.split('/').pop() ?? 'Untitled';
+      useTabStore.getState().addTab(path, name, resolved);
+      initCollaboration(path, user?.username ?? 'anonymous');
+      setStage('ready', path, resolved);
+    } else {
+      setPending({ path, nb });
+      setStage('kernel');
+    }
+  }
+
   const handleLogout = useCallback(async () => {
     await api.logout().catch(() => {});
     setUser(null);
@@ -454,6 +497,14 @@ function App() {
           const path = pending?.path;
           if (pending) {
             saveCurrentTab();
+            // Persist the chosen kernel so the notebook remembers it next time.
+            const spec = useKernelStore.getState().availableSpecs.find(s => s.name === kernelName);
+            pending.nb.metadata.kernelspec = {
+              name: kernelName,
+              display_name: spec?.display_name ?? kernelName,
+              language: spec?.language,
+            };
+            api.saveNotebook(pending.path, pending.nb).catch(() => {});
             useNotebookStore.getState().loadNotebook(pending.path, pending.nb);
             const name = pending.path.split('/').pop() ?? 'Untitled';
             useTabStore.getState().addTab(pending.path, name, kernelName);
@@ -496,26 +547,26 @@ function App() {
     >
       {stage === 'home' && (
         <HomeDashboard
-          onOpenNotebook={(path, nb) => {
-            setPending({ path, nb });
-            setStage('kernel');
-          }}
+          onOpenNotebook={(path, nb) => openNotebook(path, nb)}
           onBrowseFiles={() => setStage('browse')}
         />
       )}
       {stage === 'browse' && (
         <Dashboard
-          onOpenNotebook={(path, nb) => {
-            setPending({ path, nb });
-            setStage('kernel');
-          }}
+          onOpenNotebook={(path, nb, kernelName) => openNotebook(path, nb, kernelName)}
           onOpenDataFile={(path) => {
             // Data tabs skip the kernel picker — preview is read-only.
             // Drop straight into the editor shell with a data tab active;
             // the user can still hit the home button to come back.
             const name = path.split('/').pop() ?? 'data';
             useTabStore.getState().addDataTab(path, name);
-            setStageRaw('ready');
+            // Push the path to the URL so a page refresh restores this tab.
+            setStage('ready', path);
+          }}
+          onOpenTypstFile={(path) => {
+            const name = path.split('/').pop() ?? 'document.typ';
+            useTabStore.getState().addTypstTab(path, name);
+            setStage('ready', path);
           }}
         />
       )}
@@ -580,10 +631,7 @@ function App() {
         recent={visibleRecent}
         onNav={handleNav}
         onLogout={handleLogout}
-        onOpenNotebook={(path, nb) => {
-          setPending({ path, nb });
-          setStage('kernel');
-        }}
+        onOpenNotebook={(path, nb) => openNotebook(path, nb)}
         onNewNotebook={newNotebookFromPalette}
         notebookActions={notebookActions}
       />

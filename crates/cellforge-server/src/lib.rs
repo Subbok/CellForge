@@ -289,6 +289,8 @@ fn build_api_router() -> Router<Arc<AppState>> {
         )
         .route("/sessions/{id}", delete(kernels::delete_session))
         .route("/export/pdf", axum::routing::post(export::export_pdf))
+        .route("/export/typst", axum::routing::post(export::compile_typst))
+        .route("/export/typst/svg", axum::routing::post(export::compile_typst_svg))
         .route(
             "/templates",
             get(export::list_templates).post(export::upload_template),
@@ -298,9 +300,14 @@ fn build_api_router() -> Router<Arc<AppState>> {
             axum::routing::delete(export::delete_template),
         )
         .route(
+            "/templates/{name}/source",
+            get(export::template_source),
+        )
+        .route(
             "/templates/{name}/assets",
             axum::routing::post(export::upload_template_assets),
         )
+        .route("/data/cell", axum::routing::post(data::edit_cell))
         .route("/data/preview/{*path}", get(data::preview))
         .route("/data/stats/{*path}", get(data::column_stats))
         .route("/users/me/avatar-status", get(avatar::me_avatar_status))
@@ -312,8 +319,10 @@ fn build_api_router() -> Router<Arc<AppState>> {
         .route("/users/{username}/avatar", get(avatar::get_avatar))
         .route("/files/upload", axum::routing::post(fileops::upload))
         .route("/files/mkdir", axum::routing::post(fileops::mkdir))
+        .route("/files/write", axum::routing::post(fileops::write_file))
         .route("/files/delete", axum::routing::post(fileops::delete_path))
         .route("/files/rename", axum::routing::post(fileops::rename_path))
+        .route("/files/move", axum::routing::post(fileops::move_path))
         .route(
             "/files/download",
             axum::routing::post(fileops::download_file),

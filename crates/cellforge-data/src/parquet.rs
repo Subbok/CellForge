@@ -84,7 +84,9 @@ impl ParquetReader {
     fn preview_streaming(&self, offset: usize, limit: usize) -> Result<Vec<Vec<RowValue>>> {
         let reader = self.reader()?;
         let iter = reader.get_row_iter(None)?;
-        let mut rows = Vec::with_capacity(limit);
+        // Cap the capacity hint — callers pass usize::MAX for "all rows" and
+        // Vec::with_capacity(usize::MAX) panics with capacity overflow.
+        let mut rows = Vec::with_capacity(limit.min(4096));
         for (i, r) in iter.enumerate() {
             if i < offset {
                 let _ = r?;

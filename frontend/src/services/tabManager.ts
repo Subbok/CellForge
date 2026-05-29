@@ -72,11 +72,11 @@ export function switchToTab(id: string, username: string) {
   const tab = useTabStore.getState().tabs.find(t => t.id === id);
   if (!tab) return;
 
-  // Data tabs are read-only previews — they don't own a notebook, kernel,
-  // or yjs document, so we deliberately skip the WS/collab/notebook-restore
-  // dance. Doing it anyway would tear down the kernel session of whatever
-  // notebook the user was editing before switching to the CSV.
-  if (tab.kind === 'data') {
+  // Non-notebook tabs (data previews, Typst documents) don't own a kernel or
+  // yjs notebook document, so we deliberately skip the WS/collab/notebook-
+  // restore dance. Doing it anyway would launch a Python kernel and tear down
+  // the kernel session of whatever notebook the user was editing before.
+  if (tab.kind !== 'notebook') {
     window.history.pushState(null, '', `/notebook/${encodeURIComponent(tab.path)}`);
     return;
   }
